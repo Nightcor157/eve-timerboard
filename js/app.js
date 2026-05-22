@@ -1,0 +1,539 @@
+(function () {
+  "use strict";
+
+  const CONFIG = window.EVE_TIMERBOARD_CONFIG || {};
+  const BOARD_ID = CONFIG.boardId || "main";
+  const POLL_MS = Number(CONFIG.pollEveryMs || 15000);
+  const ADMIN_MODE = new URLSearchParams(window.location.search).has("admin");
+  const LOCAL_KEY = `eve_timerboard_${BOARD_ID}`;
+  const ADMIN_KEY_STORAGE = `eve_timerboard_admin_key_${BOARD_ID}`;
+
+  const hasSupabaseConfig = Boolean(
+    CONFIG.supabaseUrl &&
+    CONFIG.supabaseKey &&
+    !String(CONFIG.supabaseUrl).includes("YOUR-PROJECT") &&
+    !String(CONFIG.supabaseKey).includes("YOUR-SUPABASE") &&
+    window.supabase
+  );
+
+  const db = hasSupabaseConfig
+    ? window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey)
+    : null;
+
+  let timers = [];
+  let lastRenderedSignature = "";
+
+  const els = {
+    configWarning: document.getElementById("configWarning"),
+    adminPanel: document.getElementById("adminPanel"),
+    adminKey: document.getElementById("adminKey"),
+    rememberKey: document.getElementById("rememberKey"),
+    timerInput: document.getElementById("timerInput"),
+    addBtn: document.getElementById("addBtn"),
+    previewBtn: document.getElementById("previewBtn"),
+    clearInputBtn: document.getElementById("clearInputBtn"),
+    parsePreview: document.getElementById("parsePreview"),
+    adminStatus: document.getElementById("adminStatus"),
+    timersBody: document.getElementById("timersBody"),
+    timerRowTemplate: document.getElementById("timerRowTemplate"),
+    searchInput: document.getElementById("searchInput"),
+    showEnded: document.getElementById("showEnded"),
+    refreshBtn: document.getElementById("refreshBtn"),
+    exportCsvBtn: document.getElementById("exportCsvBtn"),
+    statActive: document.getElementById("statActive"),
+    statSoon: document.getElementById("statSoon"),
+    statEnded: document.getElementById("statEnded")
+  };
+
+  init();
+
+  function init() {
+    if (!hasSupabaseConfig) {
+      els.configWarning.hidden = false;
+    }
+
+    if (ADMIN_MODE) {
+      els.adminPanel.hidden = false;
+      document.querySelectorAll(".admin-only").forEach((el) => { el.hidden = false; });
+    }
+
+    const savedKey = localStorage.getItem(ADMIN_KEY_STORAGE);
+    if (savedKey) {
+      els.adminKey.value = savedKey;
+      els.rememberKey.checked = true;
+    }
+
+    els.addBtn.addEventListener("click", addTimersFromInput);
+    els.previewBtn.addEventListener("click", showPreview);
+    els.clearInputBtn.addEventListener("click", () => {
+      els.timerInput.value = "";
+      els.parsePreview.hidden = true;
+      els.adminStatus.textContent = "";
+    });
+    els.refreshBtn.addEventListener("click", loadTimers);
+    els.searchInput.addEventListener("input", renderTimers);
+    els.showEnded.addEventListener("change", renderTimers);
+    els.exportCsvBtn.addEventListener("click", exportCsv);
+    els.rememberKey.addEventListener("change", () => {
+      if (!els.rememberKey.checked) localStorage.removeItem(ADMIN_KEY_STORAGE);
+      if (els.rememberKey.checked && els.adminKey.value.trim()) {
+        localStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
+      }
+    });
+    els.adminKey.addEventListener("change", () => {
+      if (els.rememberKey.checked) {
+        localStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
+      }
+    });
+
+    loadTimers();
+    window.setInterval(tick, 1000);
+    window.setInterval(loadTimers, POLL_MS);
+  }
+
+  async function loadTimers() {
+    try {
+      if (db) {
+        const { data, error } = await db
+          .from("timers")
+          .select("id, board_id, raw_text, title, system, object_name, structure, owner, distance, mode, end_at, note, created_at")
+          .eq("board_id", BOARD_ID)
+          .order("end_at", { ascending: true });
+
+        if (error) throw error;
+        timers = (data || []).map(normalizeTimer);
+      } else {
+        timers = readLocalTimers().map(normalizeTimer);
+      }
+      renderTimers();
+    } catch (err) {
+      setStatus(`Ошибка загрузки: ${err.message || err}`, true);
+    }
+  }
+
+  function normalizeTimer(row) {
+    return {
+      id: row.id || cryptoRandomId(),
+      board_id: row.board_id || BOARD_ID,
+      raw_text: row.raw_text || "",
+      title: row.title || "",
+      system: row.system || "",
+      object_name: row.object_name || "",
+      structure: row.structure || "",
+      owner: row.owner || "",
+      distance: row.distance || "",
+      mode: row.mode || "",
+      end_at: row.end_at,
+      note: row.note || "",
+      created_at: row.created_at || new Date().toISOString()
+    };
+  }
+
+  async function addTimersFromInput() {
+    const raw = els.timerInput.value.trim();
+    if (!raw) {
+      setStatus("Вставь строку из EVE.", true);
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = parseInput(raw);
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      return;
+    }
+
+    if (!parsed.length) {
+      setStatus("Не нашёл ни одного таймера. Проверь формат строки.", true);
+      return;
+    }
+
+    const adminKey = els.adminKey.value.trim();
+    if (db && !adminKey) {
+      setStatus("Для онлайн-добавления нужен админ-ключ.", true);
+      return;
+    }
+
+    els.addBtn.disabled = true;
+    try {
+      if (db) {
+        for (const timer of parsed) {
+          const { error } = await db.rpc("add_timer", {
+            p_board_id: BOARD_ID,
+            p_admin_key: adminKey,
+            p_raw_text: timer.raw_text,
+            p_title: timer.title,
+            p_system: timer.system,
+            p_object_name: timer.object_name,
+            p_structure: timer.structure,
+            p_owner: timer.owner,
+            p_distance: timer.distance,
+            p_mode: timer.mode,
+            p_end_at: timer.end_at,
+            p_note: timer.note || ""
+          });
+          if (error) throw error;
+        }
+      } else {
+        const local = readLocalTimers();
+        parsed.forEach((timer) => local.push({ ...timer, id: cryptoRandomId(), board_id: BOARD_ID, created_at: new Date().toISOString() }));
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+      }
+
+      if (els.rememberKey.checked && adminKey) {
+        localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+      }
+
+      els.timerInput.value = "";
+      els.parsePreview.hidden = true;
+      setStatus(`Добавлено таймеров: ${parsed.length}.`, false);
+      await loadTimers();
+    } catch (err) {
+      setStatus(`Ошибка добавления: ${friendlyDbError(err)}`, true);
+    } finally {
+      els.addBtn.disabled = false;
+    }
+  }
+
+  async function deleteTimer(id) {
+    if (!ADMIN_MODE) return;
+    const timer = timers.find((t) => t.id === id);
+    const label = timer ? `${timer.system || "?"} / ${formatUtc(timer.end_at)}` : id;
+    if (!window.confirm(`Удалить таймер ${label}?`)) return;
+
+    try {
+      if (db) {
+        const adminKey = els.adminKey.value.trim();
+        if (!adminKey) {
+          setStatus("Для удаления нужен админ-ключ.", true);
+          return;
+        }
+        const { error } = await db.rpc("delete_timer", {
+          p_board_id: BOARD_ID,
+          p_admin_key: adminKey,
+          p_id: id
+        });
+        if (error) throw error;
+      } else {
+        const local = readLocalTimers().filter((t) => t.id !== id);
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+      }
+      setStatus("Таймер удалён.", false);
+      await loadTimers();
+    } catch (err) {
+      setStatus(`Ошибка удаления: ${friendlyDbError(err)}`, true);
+    }
+  }
+
+  function showPreview() {
+    try {
+      const parsed = parseInput(els.timerInput.value.trim());
+      if (!parsed.length) {
+        setStatus("Не нашёл таймеров для проверки.", true);
+        return;
+      }
+      els.parsePreview.innerHTML = parsed.map((t) => `
+        <div class="preview-card">
+          <strong>${escapeHtml(t.system || "—")}</strong>
+          <span>${escapeHtml(t.structure || "—")}</span>
+          <small>${escapeHtml(t.title || "—")} · ${escapeHtml(t.owner || "без владельца")} · ${escapeHtml(formatUtc(t.end_at))}</small>
+        </div>
+      `).join("");
+      els.parsePreview.hidden = false;
+      setStatus(`Распознано таймеров: ${parsed.length}.`, false);
+    } catch (err) {
+      els.parsePreview.hidden = true;
+      setStatus(err.message || String(err), true);
+    }
+  }
+
+  function parseInput(input) {
+    const blocks = splitTimerBlocks(input);
+    return blocks.map(parseTimerBlock);
+  }
+
+  function splitTimerBlocks(input) {
+    const normalized = normalizeBreaks(input);
+    const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
+    const blocks = [];
+    let current = [];
+
+    for (const line of lines) {
+      current.push(line);
+      if (/до\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/i.test(line)) {
+        blocks.push(current.join("\n"));
+        current = [];
+      }
+    }
+
+    if (current.length && /до\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/i.test(current.join("\n"))) {
+      blocks.push(current.join("\n"));
+    }
+
+    return blocks.filter((block) => block.includes(">"));
+  }
+
+  function parseTimerBlock(block) {
+    const lines = normalizeBreaks(block).split("\n").map((line) => line.trim()).filter(Boolean);
+    const firstLine = lines.find((line) => line.includes(">"));
+    if (!firstLine) throw new Error("Не нашёл строку с символом >.");
+
+    const arrow = firstLine.match(/^(.*?)\s*>\s*(.*)$/);
+    if (!arrow) throw new Error(`Не смог разобрать первую строку: ${firstLine}`);
+
+    const title = cleanText(arrow[1]);
+    let right = cleanText(arrow[2]);
+
+    const ownerMatch = right.match(/\[([^\]]+)\]\s*$/);
+    const owner = ownerMatch ? cleanText(ownerMatch[1]) : "";
+    if (ownerMatch) right = cleanText(right.replace(/\[([^\]]+)\]\s*$/, ""));
+
+    let system = "";
+    let object_name = "";
+    let structure = "";
+
+    const withObject = right.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+    if (withObject) {
+      structure = cleanText(withObject[1]);
+      object_name = cleanText(withObject[2]);
+      system = cleanText(object_name.replace(/\s+[IVXLCDM]+$/i, ""));
+    } else {
+      const withDash = right.match(/^(.+?)\s+-\s+(.+)$/);
+      if (withDash) {
+        system = cleanText(withDash[1]);
+        structure = cleanText(withDash[2]);
+      } else {
+        structure = cleanText(right);
+      }
+    }
+
+    const dateMatch = block.match(/до\s+(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/i);
+    if (!dateMatch) throw new Error(`Не нашёл дату в формате 2026.05.25 14:42:47: ${firstLine}`);
+
+    const [, year, month, day, hour, minute, second] = dateMatch.map(String);
+    const endDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+    if (Number.isNaN(endDate.getTime())) throw new Error(`Некорректная дата: ${dateMatch[0]}`);
+
+    const modeLine = lines.find((line) => /до\s+\d{4}\.\d{2}\.\d{2}/i.test(line)) || "";
+    const mode = cleanText(modeLine.replace(/\s+до\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}.*$/i, ""));
+
+    const distanceMatch = block.match(/(\d+(?:[,.]\d+)?)\s*(?:а\.?\s*е\.?|au|a\.u\.)/i);
+    const distance = distanceMatch ? `${distanceMatch[1].replace(".", ",")} а.е.` : "";
+
+    return {
+      raw_text: block,
+      title,
+      system,
+      object_name,
+      structure,
+      owner,
+      distance,
+      mode,
+      end_at: endDate.toISOString(),
+      note: ""
+    };
+  }
+
+  function normalizeBreaks(value) {
+    return String(value || "")
+      .replace(/&lt;br\s*\/?&gt;/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function cleanText(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(/\*+$/g, "")
+      .trim();
+  }
+
+  function renderTimers() {
+    const now = Date.now();
+    const search = els.searchInput.value.trim().toLowerCase();
+    const showEnded = els.showEnded.checked;
+
+    const enriched = timers.map((timer) => {
+      const remainingMs = new Date(timer.end_at).getTime() - now;
+      const status = getStatus(remainingMs);
+      return { ...timer, remainingMs, status };
+    });
+
+    const activeCount = enriched.filter((t) => t.remainingMs > 0).length;
+    const soonCount = enriched.filter((t) => t.remainingMs > 0 && t.remainingMs <= 4 * 3600 * 1000).length;
+    const endedCount = enriched.filter((t) => t.remainingMs <= 0).length;
+
+    els.statActive.textContent = String(activeCount);
+    els.statSoon.textContent = String(soonCount);
+    els.statEnded.textContent = String(endedCount);
+
+    const visible = enriched
+      .filter((timer) => showEnded || timer.remainingMs > 0)
+      .filter((timer) => !search || searchableText(timer).includes(search))
+      .sort((a, b) => new Date(a.end_at).getTime() - new Date(b.end_at).getTime());
+
+    const signature = JSON.stringify(visible.map((t) => [t.id, t.end_at, t.status.label, Math.floor(t.remainingMs / 1000), search, showEnded, ADMIN_MODE]));
+    if (signature === lastRenderedSignature) return;
+    lastRenderedSignature = signature;
+
+    if (!visible.length) {
+      els.timersBody.innerHTML = `<tr><td colspan="11" class="empty">Нет таймеров.</td></tr>`;
+      return;
+    }
+
+    els.timersBody.innerHTML = "";
+    for (const timer of visible) {
+      const row = els.timerRowTemplate.content.firstElementChild.cloneNode(true);
+      row.className = timer.status.className;
+
+      setCell(row, "system", timer.system || "—");
+      setCell(row, "object_name", timer.object_name || "—");
+      setCell(row, "structure", timer.structure || "—");
+      setCell(row, "title", timer.title || "—");
+      setCell(row, "owner", timer.owner || "—");
+      setCell(row, "mode", timer.mode || "—");
+      setCell(row, "distance", timer.distance || "—");
+      setCell(row, "end_at", formatUtc(timer.end_at));
+      setCell(row, "remaining", formatRemaining(timer.remainingMs));
+      setCell(row, "status", timer.status.label);
+
+      const actionsCell = row.querySelector('[data-field="actions"]');
+      if (ADMIN_MODE) {
+        actionsCell.hidden = false;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "danger-btn";
+        btn.textContent = "Удалить";
+        btn.addEventListener("click", () => deleteTimer(timer.id));
+        actionsCell.appendChild(btn);
+      }
+
+      els.timersBody.appendChild(row);
+    }
+  }
+
+  function setCell(row, field, value) {
+    const cell = row.querySelector(`[data-field="${field}"]`);
+    if (cell) cell.textContent = value;
+  }
+
+  function tick() {
+    renderTimers();
+  }
+
+  function getStatus(ms) {
+    if (ms <= 0) return { label: "Завершён", className: "is-ended" };
+    if (ms <= 4 * 3600 * 1000) return { label: "Скоро", className: "is-soon" };
+    return { label: "Активен", className: "is-active" };
+  }
+
+  function formatRemaining(ms) {
+    if (ms <= 0) return "00:00:00";
+    const total = Math.floor(ms / 1000);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const clock = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    return days > 0 ? `${days} д ${clock}` : clock;
+  }
+
+  function formatUtc(iso) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return [
+      d.getUTCFullYear(),
+      pad(d.getUTCMonth() + 1),
+      pad(d.getUTCDate())
+    ].join(".") + " " + [
+      pad(d.getUTCHours()),
+      pad(d.getUTCMinutes()),
+      pad(d.getUTCSeconds())
+    ].join(":");
+  }
+
+  function pad(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function searchableText(timer) {
+    return [timer.system, timer.object_name, timer.structure, timer.title, timer.owner, timer.mode, timer.distance, timer.raw_text]
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function readLocalTimers() {
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]");
+    } catch (_err) {
+      return [];
+    }
+  }
+
+  function exportCsv() {
+    const rows = [["system", "object", "structure", "title", "owner", "mode", "distance", "end_at_utc", "remaining", "status"]];
+    const now = Date.now();
+    timers
+      .slice()
+      .sort((a, b) => new Date(a.end_at).getTime() - new Date(b.end_at).getTime())
+      .forEach((timer) => {
+        const remainingMs = new Date(timer.end_at).getTime() - now;
+        rows.push([
+          timer.system,
+          timer.object_name,
+          timer.structure,
+          timer.title,
+          timer.owner,
+          timer.mode,
+          timer.distance,
+          formatUtc(timer.end_at),
+          formatRemaining(remainingMs),
+          getStatus(remainingMs).label
+        ]);
+      });
+
+    const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `eve-timers-${BOARD_ID}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function csvCell(value) {
+    const text = String(value || "");
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  function setStatus(text, isError) {
+    els.adminStatus.textContent = text;
+    els.adminStatus.className = `status-line ${isError ? "error" : "ok"}`;
+  }
+
+  function friendlyDbError(err) {
+    const message = err && (err.message || err.details || err.hint) ? `${err.message || ""} ${err.details || ""} ${err.hint || ""}`.trim() : String(err);
+    if (/wrong admin key|28000|invalid/i.test(message)) return "неверный админ-ключ";
+    if (/function .* does not exist|schema cache|add_timer/i.test(message)) return "SQL-схема Supabase не установлена или не обновлена";
+    return message;
+  }
+
+  function cryptoRandomId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+})();

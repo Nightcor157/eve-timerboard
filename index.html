@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EVE Online Timerboard</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span>EVE Timerboard</span>
+    </div>
+    <nav class="nav">
+      <a href="./">Доска</a>
+      <a href="?admin=1">Админ</a>
+      <button id="refreshBtn" class="ghost-btn" type="button">Обновить</button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="panel hero">
+      <div>
+        <h1>Онлайн-таймеры EVE</h1>
+        <p>
+          Общая доска таймеров: все открывают одну ссылку и видят одинаковые таймеры.
+          Отсчёт тикает у каждого зрителя в браузере каждую секунду.
+        </p>
+      </div>
+      <div class="stats">
+        <div class="stat"><span id="statActive">0</span><small>активных</small></div>
+        <div class="stat"><span id="statSoon">0</span><small>&lt; 4 часов</small></div>
+        <div class="stat"><span id="statEnded">0</span><small>завершено</small></div>
+      </div>
+    </section>
+
+    <section id="configWarning" class="panel warning" hidden>
+      <strong>База не настроена.</strong>
+      Сейчас сайт работает в локальном демо-режиме: таймеры видны только в этом браузере.
+      Для общего онлайн-доступа подключи Supabase в файле <code>js/config.js</code> и выполни SQL из <code>supabase/schema.sql</code>.
+    </section>
+
+    <section id="adminPanel" class="panel admin" hidden>
+      <div class="section-title">
+        <h2>Добавить таймеры</h2>
+        <span class="hint">Панель открывается через <code>?admin=1</code></span>
+      </div>
+
+      <div class="admin-grid">
+        <label>
+          Админ-ключ
+          <input id="adminKey" type="password" autocomplete="current-password" placeholder="ключ из schema.sql" />
+        </label>
+        <label class="checkline">
+          <input id="rememberKey" type="checkbox" />
+          <span>запомнить ключ в этом браузере</span>
+        </label>
+      </div>
+
+      <label>
+        Строка или несколько строк из EVE
+        <textarea id="timerInput" rows="7" spellcheck="false" placeholder="III Hokage > Customs Office* (Yehaba II*) [The Weak And The Scrawny]&lt;br&gt;1,7 а.е.&lt;br&gt;Укрепленный режим до 2026.05.23 10:37:54
+
+Alfajack > Hoseen - Miner's bar, striptease attached&lt;br&gt;22,5 а.е.&lt;br&gt;В оборонном режиме до 2026.05.25 14:42:47"></textarea>
+      </label>
+
+      <div class="admin-actions">
+        <button id="addBtn" class="primary-btn" type="button">Добавить</button>
+        <button id="previewBtn" class="secondary-btn" type="button">Проверить парсинг</button>
+        <button id="clearInputBtn" class="ghost-btn" type="button">Очистить поле</button>
+      </div>
+
+      <div id="parsePreview" class="preview" hidden></div>
+      <div id="adminStatus" class="status-line" aria-live="polite"></div>
+    </section>
+
+    <section class="panel board">
+      <div class="section-title board-title">
+        <h2>Таймеры</h2>
+        <div class="toolbar">
+          <input id="searchInput" type="search" placeholder="Фильтр: система, владелец, структура..." />
+          <label class="checkline compact">
+            <input id="showEnded" type="checkbox" />
+            <span>показывать завершённые</span>
+          </label>
+          <button id="exportCsvBtn" class="secondary-btn" type="button">CSV</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Система</th>
+              <th>Объект</th>
+              <th>Структура</th>
+              <th>Название</th>
+              <th>Владелец</th>
+              <th>Режим</th>
+              <th>Дистанция</th>
+              <th>Укреплён до, EVE/UTC</th>
+              <th>Осталось</th>
+              <th>Статус</th>
+              <th class="admin-only" hidden>Действия</th>
+            </tr>
+          </thead>
+          <tbody id="timersBody">
+            <tr><td colspan="11" class="empty">Загрузка...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <template id="timerRowTemplate">
+    <tr>
+      <td data-field="system"></td>
+      <td data-field="object_name"></td>
+      <td data-field="structure"></td>
+      <td data-field="title"></td>
+      <td data-field="owner"></td>
+      <td data-field="mode"></td>
+      <td data-field="distance"></td>
+      <td data-field="end_at"></td>
+      <td data-field="remaining" class="remaining"></td>
+      <td data-field="status"></td>
+      <td data-field="actions" class="admin-only" hidden></td>
+    </tr>
+  </template>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
