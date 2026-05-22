@@ -366,7 +366,7 @@
   }
 
   function isDistanceLine(value) {
-    return /^(\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)|\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:м|m))$/i.test(value);
+    return /^(\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)|\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:км|km|м|m))$/i.test(value);
   }
 
   function hasChatTimestamp(value) {
@@ -379,6 +379,8 @@
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/\\n/g, "\n")
       .replace(/\r/g, "\n")
+      .replace(/(\])\s*(?=\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:км|km|м|m|а\.?[ \t]*е\.?|au|a\.u\.))/gi, "$1\n")
+      .replace(/(\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:км|km|м|m)|\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.))\s*(?=(?:Укреп|В оборонном|Reinforced))/gi, "$1\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
