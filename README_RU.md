@@ -22,6 +22,16 @@ III Hokage > Customs Office* (Yehaba II*) [The Weak And The Scrawny]<br>1,7 а.�
 Alfajack > Hoseen - Miner's bar, striptease attached<br>22,5 а.е.<br>В оборонном режиме до 2026.05.25 14:42:47
 ```
 
+```text
+[12:44:39] Tygarin Kvazovsky > Hakatiz - 7-6<br>8,4 AU<br>Reinforced until 2026.05.22 13:08:10
+```
+
+```text
+Hakatiz - 7-6
+9 149 м
+В оборонном режиме до 2026.05.22 13:08:10
+```
+
 Время считается как EVE/UTC.
 
 ## Быстрый запуск онлайн

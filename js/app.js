@@ -261,29 +261,27 @@
 
     for (const line of lines) {
       current.push(line);
-      if (/до\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/i.test(line)) {
+      if (hasTimerDate(line)) {
         blocks.push(current.join("\n"));
         current = [];
       }
     }
 
-    if (current.length && /до\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/i.test(current.join("\n"))) {
+    if (current.length && hasTimerDate(current.join("\n"))) {
       blocks.push(current.join("\n"));
     }
 
-    return blocks.filter((block) => block.includes(">"));
+    return blocks.filter(hasTimerDate);
   }
 
   function parseTimerBlock(block) {
     const lines = normalizeBreaks(block).split("\n").map((line) => line.trim()).filter(Boolean);
-    const firstLine = lines.find((line) => line.includes(">"));
-    if (!firstLine) throw new Error("Не нашёл строку с символом >.");
+    const firstLine = lines.find((line) => !hasTimerDate(line) && !isDistanceLine(line));
+    if (!firstLine) throw new Error("Не нашёл строку с названием таймера.");
 
     const arrow = firstLine.match(/^(.*?)\s*>\s*(.*)$/);
-    if (!arrow) throw new Error(`Не смог разобрать первую строку: ${firstLine}`);
-
-    const title = cleanText(arrow[1]);
-    let right = cleanText(arrow[2]);
+    const title = arrow ? cleanText(stripChatTimestamp(arrow[1])) : "";
+    let right = cleanText(arrow ? arrow[2] : firstLine);
 
     const ownerMatch = right.match(/\[([^\]]+)\]\s*$/);
     const owner = ownerMatch ? cleanText(ownerMatch[1]) : "";
@@ -308,18 +306,25 @@
       }
     }
 
-    const dateMatch = block.match(/до\s+(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/i);
+    const dateMatch = block.match(/(?:до|until)\s+(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/i);
     if (!dateMatch) throw new Error(`Не нашёл дату в формате 2026.05.25 14:42:47: ${firstLine}`);
 
     const [, year, month, day, hour, minute, second] = dateMatch.map(String);
     const endDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
     if (Number.isNaN(endDate.getTime())) throw new Error(`Некорректная дата: ${dateMatch[0]}`);
 
-    const modeLine = lines.find((line) => /до\s+\d{4}\.\d{2}\.\d{2}/i.test(line)) || "";
-    const mode = cleanText(modeLine.replace(/\s+до\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}.*$/i, ""));
+    const modeLine = lines.find(hasTimerDate) || "";
+    const mode = cleanText(modeLine.replace(/\s+(?:до|until)\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}.*$/i, ""));
 
-    const distanceMatch = block.match(/(\d+(?:[,.]\d+)?)\s*(?:а\.?\s*е\.?|au|a\.u\.)/i);
-    const distance = distanceMatch ? `${distanceMatch[1].replace(".", ",")} а.е.` : "";
+    const distanceLine = lines.find(isDistanceLine) || "";
+    const auDistanceMatch = distanceLine.match(/(\d+(?:[,.]\d+)?)[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)/i);
+    const meterDistanceMatch = distanceLine.match(/(\d[\d \t]*(?:[,.]\d+)?)[ \t]*(?:м|m)$/i);
+    let distance = "";
+    if (auDistanceMatch) {
+      distance = `${auDistanceMatch[1].replace(".", ",")} а.е.`;
+    } else if (meterDistanceMatch) {
+      distance = `${cleanText(meterDistanceMatch[1])} м`;
+    }
 
     return {
       raw_text: block,
@@ -333,6 +338,18 @@
       end_at: endDate.toISOString(),
       note: ""
     };
+  }
+
+  function hasTimerDate(value) {
+    return /(?:до|until)\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/i.test(value);
+  }
+
+  function isDistanceLine(value) {
+    return /^(\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)|\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:м|m))$/i.test(value);
+  }
+
+  function stripChatTimestamp(value) {
+    return String(value || "").replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "");
   }
 
   function normalizeBreaks(value) {
