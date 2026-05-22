@@ -280,7 +280,7 @@
     if (!firstLine) throw new Error("Не нашёл строку с названием таймера.");
 
     const arrow = firstLine.match(/^(.*?)\s*>\s*(.*)$/);
-    const title = arrow ? cleanText(stripChatTimestamp(arrow[1])) : "";
+    const title = arrow && !hasChatTimestamp(arrow[1]) ? cleanText(arrow[1]) : "";
     let right = cleanText(arrow ? arrow[2] : firstLine);
 
     const ownerMatch = right.match(/\[([^\]]+)\]\s*$/);
@@ -306,15 +306,15 @@
       }
     }
 
-    const dateMatch = block.match(/(?:до|until)\s+(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/i);
+    const dateMatch = getTimerDateMatch(block);
     if (!dateMatch) throw new Error(`Не нашёл дату в формате 2026.05.25 14:42:47: ${firstLine}`);
 
-    const [, year, month, day, hour, minute, second] = dateMatch.map(String);
+    const [, year, month, day, hour, minute, second = "0"] = dateMatch;
     const endDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
     if (Number.isNaN(endDate.getTime())) throw new Error(`Некорректная дата: ${dateMatch[0]}`);
 
     const modeLine = lines.find(hasTimerDate) || "";
-    const mode = cleanText(modeLine.replace(/\s+(?:до|until)\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}.*$/i, ""));
+    const mode = cleanText(modeLine.replace(/\s+(?:до|until)\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?.*$/i, ""));
 
     const distanceLine = lines.find(isDistanceLine) || "";
     const auDistanceMatch = distanceLine.match(/(\d+(?:[,.]\d+)?)[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)/i);
@@ -341,15 +341,19 @@
   }
 
   function hasTimerDate(value) {
-    return /(?:до|until)\s+\d{4}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2}/i.test(value);
+    return Boolean(getTimerDateMatch(value));
+  }
+
+  function getTimerDateMatch(value) {
+    return String(value || "").match(/(?:до|until)\s+(\d{4})[.-](\d{1,2})[.-](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/i);
   }
 
   function isDistanceLine(value) {
     return /^(\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)|\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:м|m))$/i.test(value);
   }
 
-  function stripChatTimestamp(value) {
-    return String(value || "").replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "");
+  function hasChatTimestamp(value) {
+    return /^\s*\[\d{2}:\d{2}:\d{2}\]/.test(String(value || ""));
   }
 
   function normalizeBreaks(value) {
