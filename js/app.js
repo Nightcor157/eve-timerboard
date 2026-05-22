@@ -7,6 +7,26 @@
   const ADMIN_MODE = new URLSearchParams(window.location.search).has("admin");
   const LOCAL_KEY = `eve_timerboard_${BOARD_ID}`;
   const ADMIN_KEY_STORAGE = `eve_timerboard_admin_key_${BOARD_ID}`;
+  const STRUCTURE_TYPE_OPTIONS = [
+    ["", "—"],
+    ["Astrahus", "Astrahus"],
+    ["Fortizar", "Fortizar"],
+    ["Keepstar", "Keepstar"],
+    ["Raitaru", "Raitaru"],
+    ["Azbel", "Azbel"],
+    ["Sotiyo", "Sotiyo"],
+    ["Athanor", "Athanor"],
+    ["Tatara", "Tatara"],
+    ["Customs Office", "Customs Office"],
+    ["IHub", "IHub"],
+    ["TCU", "TCU"],
+    ["POS", "POS"]
+  ];
+  const TIMER_KIND_OPTIONS = [
+    ["", "—"],
+    ["Атака", "Атака"],
+    ["Оборона", "Оборона"]
+  ];
 
   const hasSupabaseConfig = Boolean(
     CONFIG.supabaseUrl &&
@@ -293,9 +313,11 @@
 
     const withObject = right.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
     if (withObject) {
-      structure = cleanText(withObject[1]);
-      object_name = cleanText(withObject[2]);
-      system = cleanText(object_name.replace(/\s+[IVXLCDM]+$/i, ""));
+      const typeGuess = cleanText(withObject[1]);
+      const location = cleanText(withObject[2]);
+      object_name = normalizeStructureType(typeGuess);
+      structure = object_name ? location : typeGuess;
+      system = cleanText(location.replace(/\s+[IVXLCDM]+$/i, ""));
     } else {
       const withDash = right.match(/^(.+?)\s+-\s+(.+)$/);
       if (withDash) {
@@ -316,15 +338,7 @@
     const modeLine = lines.find(hasTimerDate) || "";
     const mode = cleanText(modeLine.replace(/\s+(?:до|until)\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?.*$/i, ""));
 
-    const distanceLine = lines.find(isDistanceLine) || "";
-    const auDistanceMatch = distanceLine.match(/(\d+(?:[,.]\d+)?)[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)/i);
-    const meterDistanceMatch = distanceLine.match(/(\d[\d \t]*(?:[,.]\d+)?)[ \t]*(?:м|m)$/i);
-    let distance = "";
-    if (auDistanceMatch) {
-      distance = `${auDistanceMatch[1].replace(".", ",")} а.е.`;
-    } else if (meterDistanceMatch) {
-      distance = `${cleanText(meterDistanceMatch[1])} м`;
-    }
+    const distance = "";
 
     return {
       raw_text: block,
@@ -374,6 +388,8 @@
   }
 
   function renderTimers() {
+    if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("table-select")) return;
+
     const now = Date.now();
     const search = els.searchInput.value.trim().toLowerCase();
     const showEnded = els.showEnded.checked;
@@ -397,7 +413,22 @@
       .filter((timer) => !search || searchableText(timer).includes(search))
       .sort((a, b) => new Date(a.end_at).getTime() - new Date(b.end_at).getTime());
 
-    const signature = JSON.stringify(visible.map((t) => [t.id, t.end_at, t.status.label, Math.floor(t.remainingMs / 1000), search, showEnded, ADMIN_MODE]));
+    const signature = JSON.stringify(visible.map((t) => [
+      t.id,
+      t.system,
+      t.object_name,
+      t.structure,
+      t.title,
+      t.owner,
+      t.mode,
+      t.distance,
+      t.end_at,
+      t.status.label,
+      Math.floor(t.remainingMs / 1000),
+      search,
+      showEnded,
+      ADMIN_MODE
+    ]));
     if (signature === lastRenderedSignature) return;
     lastRenderedSignature = signature;
 
@@ -412,12 +443,20 @@
       row.className = timer.status.className;
 
       setCell(row, "system", timer.system || "—");
-      setCell(row, "object_name", timer.object_name || "—");
+      if (ADMIN_MODE) {
+        setSelectCell(row, "object_name", STRUCTURE_TYPE_OPTIONS, normalizeStructureType(timer.object_name), (value) => saveTimerAdminFields(timer, { object_name: value }));
+      } else {
+        setCell(row, "object_name", normalizeStructureType(timer.object_name) || "—");
+      }
       setCell(row, "structure", timer.structure || "—");
       setCell(row, "title", timer.title || "—");
       setCell(row, "owner", timer.owner || "—");
       setCell(row, "mode", timer.mode || "—");
-      setCell(row, "distance", timer.distance || "—");
+      if (ADMIN_MODE) {
+        setSelectCell(row, "timer_kind", TIMER_KIND_OPTIONS, normalizeTimerKind(timer.distance), (value) => saveTimerAdminFields(timer, { distance: value }));
+      } else {
+        setCell(row, "timer_kind", normalizeTimerKind(timer.distance) || "—");
+      }
       setCell(row, "end_at", formatUtc(timer.end_at));
       setCell(row, "remaining", formatRemaining(timer.remainingMs));
       setCell(row, "status", timer.status.label);
@@ -440,6 +479,80 @@
   function setCell(row, field, value) {
     const cell = row.querySelector(`[data-field="${field}"]`);
     if (cell) cell.textContent = value;
+  }
+
+  function setSelectCell(row, field, options, value, onChange) {
+    const cell = row.querySelector(`[data-field="${field}"]`);
+    if (!cell) return;
+
+    const select = document.createElement("select");
+    select.className = "table-select";
+    for (const [optionValue, label] of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    select.value = options.some(([optionValue]) => optionValue === value) ? value : "";
+    select.addEventListener("change", async () => {
+      select.disabled = true;
+      await onChange(select.value);
+      select.disabled = false;
+    });
+    cell.textContent = "";
+    cell.appendChild(select);
+  }
+
+  async function saveTimerAdminFields(timer, changes) {
+    if (!ADMIN_MODE) return;
+    const updated = {
+      ...timer,
+      object_name: Object.prototype.hasOwnProperty.call(changes, "object_name") ? changes.object_name : normalizeStructureType(timer.object_name),
+      distance: Object.prototype.hasOwnProperty.call(changes, "distance") ? changes.distance : normalizeTimerKind(timer.distance)
+    };
+
+    try {
+      if (db) {
+        const adminKey = els.adminKey.value.trim();
+        if (!adminKey) {
+          setStatus("Для изменения таймера нужен админ-ключ.", true);
+          await loadTimers();
+          return;
+        }
+
+        const { error } = await db.rpc("update_timer_admin_fields", {
+          p_board_id: BOARD_ID,
+          p_admin_key: adminKey,
+          p_id: timer.id,
+          p_object_name: normalizeStructureType(updated.object_name),
+          p_timer_kind: normalizeTimerKind(updated.distance)
+        });
+        if (error) throw error;
+      } else {
+        const local = readLocalTimers().map((item) => item.id === timer.id ? { ...item, object_name: normalizeStructureType(updated.object_name), distance: normalizeTimerKind(updated.distance) } : item);
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+      }
+
+      setStatus("Таймер обновлён.", false);
+      lastRenderedSignature = "";
+      await loadTimers();
+    } catch (err) {
+      setStatus(`Ошибка обновления: ${friendlyDbError(err)}`, true);
+      await loadTimers();
+    }
+  }
+
+  function normalizeTimerKind(value) {
+    const text = cleanText(value);
+    if (/^атака$/i.test(text)) return "Атака";
+    if (/^оборона$/i.test(text)) return "Оборона";
+    return "";
+  }
+
+  function normalizeStructureType(value) {
+    const text = cleanText(value);
+    const option = STRUCTURE_TYPE_OPTIONS.find(([optionValue]) => optionValue && optionValue.toLowerCase() === text.toLowerCase());
+    return option ? option[0] : "";
   }
 
   function tick() {
@@ -482,7 +595,7 @@
   }
 
   function searchableText(timer) {
-    return [timer.system, timer.object_name, timer.structure, timer.title, timer.owner, timer.mode, timer.distance, timer.raw_text]
+    return [timer.system, normalizeStructureType(timer.object_name), timer.structure, timer.title, timer.owner, timer.mode, normalizeTimerKind(timer.distance), timer.raw_text]
       .join(" ")
       .toLowerCase();
   }
@@ -496,7 +609,7 @@
   }
 
   function exportCsv() {
-    const rows = [["system", "object", "structure", "title", "owner", "mode", "distance", "end_at_utc", "remaining", "status"]];
+    const rows = [["system", "object_type", "structure", "title", "owner", "mode", "timer_kind", "end_at_utc", "remaining", "status"]];
     const now = Date.now();
     timers
       .slice()
@@ -505,12 +618,12 @@
         const remainingMs = new Date(timer.end_at).getTime() - now;
         rows.push([
           timer.system,
-          timer.object_name,
+          normalizeStructureType(timer.object_name),
           timer.structure,
           timer.title,
           timer.owner,
           timer.mode,
-          timer.distance,
+          normalizeTimerKind(timer.distance),
           formatUtc(timer.end_at),
           formatRemaining(remainingMs),
           getStatus(remainingMs).label
@@ -540,6 +653,7 @@
   function friendlyDbError(err) {
     const message = err && (err.message || err.details || err.hint) ? `${err.message || ""} ${err.details || ""} ${err.hint || ""}`.trim() : String(err);
     if (/wrong admin key|28000|invalid/i.test(message)) return "неверный админ-ключ";
+    if (/update_timer_admin_fields/i.test(message)) return "в Supabase нужно добавить функцию update_timer_admin_fields";
     if (/function .* does not exist|schema cache|add_timer/i.test(message)) return "SQL-схема Supabase не установлена или не обновлена";
     return message;
   }

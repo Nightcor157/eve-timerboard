@@ -46,6 +46,9 @@ Hakatiz - 7-6
 
 Админ-ключ не вставляй в код сайта. Его вводят только на странице `?admin=1`.
 
+Для ручной правки типа структуры и типа таймера через выпадающие меню
+выполни в SQL Editor файл `supabase_update_timer_admin_fields.sql`.
+
 ### 2. Настрой `js/config.js`
 
 В Supabase открой Project Settings → API и скопируй:

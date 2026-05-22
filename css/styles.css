@@ -162,7 +162,7 @@ label {
   font-size: 0.92rem;
 }
 
-input, textarea, button {
+input, textarea, button, select {
   font: inherit;
 }
 
@@ -183,6 +183,19 @@ textarea {
 }
 
 input:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(39, 167, 216, 0.14);
+}
+
+select {
+  color: var(--text);
+  background: #081824;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  outline: none;
+}
+
+select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(39, 167, 216, 0.14);
 }
@@ -297,6 +310,12 @@ tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
   font-variant-numeric: tabular-nums;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.table-select {
+  width: 100%;
+  min-width: 8.5rem;
+  padding: 0.45rem 0.55rem;
 }
 
 .empty {
