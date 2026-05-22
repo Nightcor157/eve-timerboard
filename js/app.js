@@ -17,6 +17,7 @@
     ["Sotiyo", "Sotiyo"],
     ["Athanor", "Athanor"],
     ["Tatara", "Tatara"],
+    ["Metenox Moon Drill", "Metenox Moon Drill"],
     ["Customs Office", "Customs Office"],
     ["IHub", "IHub"],
     ["TCU", "TCU"],

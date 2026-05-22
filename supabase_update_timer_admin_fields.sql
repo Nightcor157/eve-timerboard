@@ -21,6 +21,7 @@ begin
           'Astrahus', 'Fortizar', 'Keepstar',
           'Raitaru', 'Azbel', 'Sotiyo',
           'Athanor', 'Tatara',
+          'Metenox Moon Drill',
           'Customs Office', 'IHub', 'TCU', 'POS'
         ) then p_object_name
         else ''
