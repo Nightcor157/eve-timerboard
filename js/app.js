@@ -389,7 +389,7 @@
   }
 
   function renderTimers() {
-    if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("table-select")) return;
+    if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("table-control")) return;
 
     const now = Date.now();
     const search = els.searchInput.value.trim().toLowerCase();
@@ -443,22 +443,37 @@
       const row = els.timerRowTemplate.content.firstElementChild.cloneNode(true);
       row.className = timer.status.className;
 
-      setCell(row, "system", timer.system || "—");
+      if (ADMIN_MODE) {
+        setEditableCell(row, "system", timer.system, (value) => saveTimerAdminFields(timer, { system: value }));
+      } else {
+        setCell(row, "system", timer.system || "—");
+      }
       if (ADMIN_MODE) {
         setSelectCell(row, "object_name", STRUCTURE_TYPE_OPTIONS, normalizeStructureType(timer.object_name), (value) => saveTimerAdminFields(timer, { object_name: value }));
       } else {
         setCell(row, "object_name", normalizeStructureType(timer.object_name) || "—");
       }
-      setCell(row, "structure", timer.structure || "—");
-      setCell(row, "title", timer.title || "—");
-      setCell(row, "owner", timer.owner || "—");
-      setCell(row, "mode", timer.mode || "—");
+      if (ADMIN_MODE) {
+        setEditableCell(row, "structure", timer.structure, (value) => saveTimerAdminFields(timer, { structure: value }));
+        setEditableCell(row, "title", timer.title, (value) => saveTimerAdminFields(timer, { title: value }));
+        setEditableCell(row, "owner", timer.owner, (value) => saveTimerAdminFields(timer, { owner: value }));
+        setEditableCell(row, "mode", timer.mode, (value) => saveTimerAdminFields(timer, { mode: value }));
+      } else {
+        setCell(row, "structure", timer.structure || "—");
+        setCell(row, "title", timer.title || "—");
+        setCell(row, "owner", timer.owner || "—");
+        setCell(row, "mode", timer.mode || "—");
+      }
       if (ADMIN_MODE) {
         setSelectCell(row, "timer_kind", TIMER_KIND_OPTIONS, normalizeTimerKind(timer.distance), (value) => saveTimerAdminFields(timer, { distance: value }));
       } else {
         setCell(row, "timer_kind", normalizeTimerKind(timer.distance) || "—");
       }
-      setCell(row, "end_at", formatUtc(timer.end_at));
+      if (ADMIN_MODE) {
+        setEditableCell(row, "end_at", formatUtc(timer.end_at), (value) => saveTimerAdminFields(timer, { end_at: value }), "2026.05.22 13:08:10");
+      } else {
+        setCell(row, "end_at", formatUtc(timer.end_at));
+      }
       setCell(row, "remaining", formatRemaining(timer.remainingMs));
       setCell(row, "status", timer.status.label);
 
@@ -482,12 +497,44 @@
     if (cell) cell.textContent = value;
   }
 
+  function setEditableCell(row, field, value, onSave, placeholder = "") {
+    const cell = row.querySelector(`[data-field="${field}"]`);
+    if (!cell) return;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "table-control table-input";
+    input.value = value || "";
+    input.placeholder = placeholder;
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") input.blur();
+      if (event.key === "Escape") {
+        input.value = value || "";
+        input.blur();
+      }
+    });
+
+    input.addEventListener("blur", async () => {
+      const nextValue = input.value.trim();
+      const previousValue = String(value || "").trim();
+      if (nextValue === previousValue) return;
+
+      input.disabled = true;
+      await onSave(nextValue);
+      input.disabled = false;
+    });
+
+    cell.textContent = "";
+    cell.appendChild(input);
+  }
+
   function setSelectCell(row, field, options, value, onChange) {
     const cell = row.querySelector(`[data-field="${field}"]`);
     if (!cell) return;
 
     const select = document.createElement("select");
-    select.className = "table-select";
+    select.className = "table-control table-select";
     for (const [optionValue, label] of options) {
       const option = document.createElement("option");
       option.value = optionValue;
@@ -506,10 +553,23 @@
 
   async function saveTimerAdminFields(timer, changes) {
     if (!ADMIN_MODE) return;
+    const nextEndAt = Object.prototype.hasOwnProperty.call(changes, "end_at") ? parseUtcInput(changes.end_at) : timer.end_at;
+    if (!nextEndAt) {
+      setStatus("Дата должна быть в формате 2026.05.22 13:08:10.", true);
+      await loadTimers();
+      return;
+    }
+
     const updated = {
       ...timer,
+      title: Object.prototype.hasOwnProperty.call(changes, "title") ? cleanText(changes.title) : timer.title,
+      system: Object.prototype.hasOwnProperty.call(changes, "system") ? cleanText(changes.system) : timer.system,
       object_name: Object.prototype.hasOwnProperty.call(changes, "object_name") ? changes.object_name : normalizeStructureType(timer.object_name),
-      distance: Object.prototype.hasOwnProperty.call(changes, "distance") ? changes.distance : normalizeTimerKind(timer.distance)
+      structure: Object.prototype.hasOwnProperty.call(changes, "structure") ? cleanText(changes.structure) : timer.structure,
+      owner: Object.prototype.hasOwnProperty.call(changes, "owner") ? cleanText(changes.owner) : timer.owner,
+      distance: Object.prototype.hasOwnProperty.call(changes, "distance") ? changes.distance : normalizeTimerKind(timer.distance),
+      mode: Object.prototype.hasOwnProperty.call(changes, "mode") ? cleanText(changes.mode) : timer.mode,
+      end_at: nextEndAt
     };
 
     try {
@@ -525,12 +585,28 @@
           p_board_id: BOARD_ID,
           p_admin_key: adminKey,
           p_id: timer.id,
+          p_title: updated.title || "",
+          p_system: updated.system || "",
           p_object_name: normalizeStructureType(updated.object_name),
-          p_timer_kind: normalizeTimerKind(updated.distance)
+          p_structure: updated.structure || "",
+          p_owner: updated.owner || "",
+          p_timer_kind: normalizeTimerKind(updated.distance),
+          p_mode: updated.mode || "",
+          p_end_at: updated.end_at
         });
         if (error) throw error;
       } else {
-        const local = readLocalTimers().map((item) => item.id === timer.id ? { ...item, object_name: normalizeStructureType(updated.object_name), distance: normalizeTimerKind(updated.distance) } : item);
+        const local = readLocalTimers().map((item) => item.id === timer.id ? {
+          ...item,
+          title: updated.title || "",
+          system: updated.system || "",
+          object_name: normalizeStructureType(updated.object_name),
+          structure: updated.structure || "",
+          owner: updated.owner || "",
+          distance: normalizeTimerKind(updated.distance),
+          mode: updated.mode || "",
+          end_at: updated.end_at
+        } : item);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
       }
 
@@ -589,6 +665,17 @@
       pad(d.getUTCMinutes()),
       pad(d.getUTCSeconds())
     ].join(":");
+  }
+
+  function parseUtcInput(value) {
+    const match = String(value || "").trim().match(/^(\d{4})[.-](\d{1,2})[.-](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) return "";
+
+    const [, year, month, day, hour, minute, second = "0"] = match;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+    if (Number.isNaN(date.getTime())) return "";
+
+    return date.toISOString();
   }
 
   function pad(value) {

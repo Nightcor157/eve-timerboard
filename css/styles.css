@@ -312,10 +312,23 @@ tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
   white-space: nowrap;
 }
 
-.table-select {
+.table-control {
   width: 100%;
   min-width: 8.5rem;
   padding: 0.45rem 0.55rem;
+}
+
+.table-input {
+  color: var(--text);
+  background: #081824;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  outline: none;
+}
+
+.table-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(39, 167, 216, 0.14);
 }
 
 .empty {
