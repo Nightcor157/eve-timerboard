@@ -228,6 +228,18 @@ select:focus {
 .toolbar { justify-content: flex-end; }
 .toolbar input[type="search"] { min-width: min(32rem, 55vw); }
 
+.toolbar-select {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.toolbar-select select {
+  min-width: 10rem;
+  padding: 0.55rem 0.65rem;
+}
+
 button {
   border: 1px solid transparent;
   border-radius: 0.65rem;
@@ -331,6 +343,29 @@ tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
   box-shadow: 0 0 0 3px rgba(39, 167, 216, 0.14);
 }
 
+.timer-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0.32rem 0.55rem;
+  font-weight: 800;
+}
+
+.is-attack-kind {
+  color: #ffe0e0;
+  background: rgba(255, 76, 76, 0.24);
+  border-color: rgba(255, 76, 76, 0.55);
+}
+
+.is-defense-kind {
+  color: #dfffe9;
+  background: rgba(80, 190, 118, 0.24);
+  border-color: rgba(80, 190, 118, 0.55);
+}
+
 .empty {
   text-align: center;
   padding: 2rem;
@@ -347,7 +382,7 @@ tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
     width: 100%;
     grid-template-columns: 1fr;
   }
-  .toolbar, .toolbar input[type="search"] {
+  .toolbar, .toolbar input[type="search"], .toolbar-select, .toolbar-select select {
     width: 100%;
   }
 }

@@ -82,6 +82,14 @@ Hakatiz - 7-6
         <h2>Таймеры</h2>
         <div class="toolbar">
           <input id="searchInput" type="search" placeholder="Фильтр: система, владелец, структура..." />
+          <label class="toolbar-select">
+            <span>Сортировка</span>
+            <select id="sortSelect">
+              <option value="time">по времени</option>
+              <option value="title">по названию</option>
+              <option value="system">по системе</option>
+            </select>
+          </label>
           <label class="checkline compact">
             <input id="showEnded" type="checkbox" />
             <span>показывать завершённые</span>
@@ -133,6 +141,6 @@ Hakatiz - 7-6
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20260522-7"></script>
+  <script src="js/app.js?v=20260522-8"></script>
 </body>
 </html>

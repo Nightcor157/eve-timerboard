@@ -58,6 +58,7 @@
     timersBody: document.getElementById("timersBody"),
     timerRowTemplate: document.getElementById("timerRowTemplate"),
     searchInput: document.getElementById("searchInput"),
+    sortSelect: document.getElementById("sortSelect"),
     showEnded: document.getElementById("showEnded"),
     refreshBtn: document.getElementById("refreshBtn"),
     exportCsvBtn: document.getElementById("exportCsvBtn"),
@@ -93,6 +94,7 @@
     });
     els.refreshBtn.addEventListener("click", loadTimers);
     els.searchInput.addEventListener("input", renderTimers);
+    els.sortSelect.addEventListener("change", renderTimers);
     els.showEnded.addEventListener("change", renderTimers);
     els.exportCsvBtn.addEventListener("click", exportCsv);
     els.rememberKey.addEventListener("change", () => {
@@ -393,6 +395,7 @@
 
     const now = Date.now();
     const search = els.searchInput.value.trim().toLowerCase();
+    const sortMode = els.sortSelect.value;
     const showEnded = els.showEnded.checked;
 
     const enriched = timers.map((timer) => {
@@ -412,7 +415,7 @@
     const visible = enriched
       .filter((timer) => showEnded || timer.remainingMs > 0)
       .filter((timer) => !search || searchableText(timer).includes(search))
-      .sort((a, b) => new Date(a.end_at).getTime() - new Date(b.end_at).getTime());
+      .sort((a, b) => compareTimers(a, b, sortMode));
 
     const signature = JSON.stringify(visible.map((t) => [
       t.id,
@@ -427,6 +430,7 @@
       t.status.label,
       Math.floor(t.remainingMs / 1000),
       search,
+      sortMode,
       showEnded,
       ADMIN_MODE
     ]));
@@ -467,7 +471,7 @@
       if (ADMIN_MODE) {
         setSelectCell(row, "timer_kind", TIMER_KIND_OPTIONS, normalizeTimerKind(timer.distance), (value) => saveTimerAdminFields(timer, { distance: value }));
       } else {
-        setCell(row, "timer_kind", normalizeTimerKind(timer.distance) || "—");
+        setTimerKindCell(row, "timer_kind", normalizeTimerKind(timer.distance));
       }
       if (ADMIN_MODE) {
         setEditableCell(row, "end_at", formatUtc(timer.end_at), (value) => saveTimerAdminFields(timer, { end_at: value }), "2026.05.22 13:08:10");
@@ -495,6 +499,23 @@
   function setCell(row, field, value) {
     const cell = row.querySelector(`[data-field="${field}"]`);
     if (cell) cell.textContent = value;
+  }
+
+  function setTimerKindCell(row, field, value) {
+    const cell = row.querySelector(`[data-field="${field}"]`);
+    if (!cell) return;
+
+    const kind = normalizeTimerKind(value);
+    cell.textContent = "";
+    if (!kind) {
+      cell.textContent = "—";
+      return;
+    }
+
+    const badge = document.createElement("span");
+    badge.className = `timer-kind-badge ${timerKindClass(kind)}`;
+    badge.textContent = kind;
+    cell.appendChild(badge);
   }
 
   function setEditableCell(row, field, value, onSave, placeholder = "") {
@@ -534,7 +555,7 @@
     if (!cell) return;
 
     const select = document.createElement("select");
-    select.className = "table-control table-select";
+    select.className = `table-control table-select ${timerKindClass(value)}`;
     for (const [optionValue, label] of options) {
       const option = document.createElement("option");
       option.value = optionValue;
@@ -543,6 +564,9 @@
     }
     select.value = options.some(([optionValue]) => optionValue === value) ? value : "";
     select.addEventListener("change", async () => {
+      select.classList.remove("is-attack-kind", "is-defense-kind");
+      const nextClass = timerKindClass(select.value);
+      if (nextClass) select.classList.add(nextClass);
       select.disabled = true;
       await onChange(select.value);
       select.disabled = false;
@@ -624,6 +648,31 @@
     if (/^атака$/i.test(text)) return "Атака";
     if (/^оборона$/i.test(text)) return "Оборона";
     return "";
+  }
+
+  function timerKindClass(value) {
+    const kind = normalizeTimerKind(value);
+    if (kind === "Атака") return "is-attack-kind";
+    if (kind === "Оборона") return "is-defense-kind";
+    return "";
+  }
+
+  function compareTimers(a, b, sortMode) {
+    if (sortMode === "title") {
+      return compareText(a.title || a.structure || a.system, b.title || b.structure || b.system) || compareTime(a, b);
+    }
+    if (sortMode === "system") {
+      return compareText(a.system, b.system) || compareTime(a, b);
+    }
+    return compareTime(a, b);
+  }
+
+  function compareTime(a, b) {
+    return new Date(a.end_at).getTime() - new Date(b.end_at).getTime();
+  }
+
+  function compareText(a, b) {
+    return String(a || "").localeCompare(String(b || ""), "ru", { numeric: true, sensitivity: "base" });
   }
 
   function normalizeStructureType(value) {
