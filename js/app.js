@@ -7,6 +7,7 @@
   const ADMIN_MODE = new URLSearchParams(window.location.search).has("admin");
   const LOCAL_KEY = `eve_timerboard_${BOARD_ID}`;
   const ADMIN_KEY_STORAGE = `eve_timerboard_admin_key_${BOARD_ID}`;
+  const VIEW_KEY_STORAGE = `eve_timerboard_view_key_${BOARD_ID}`;
   const STRUCTURE_TYPE_OPTIONS = [
     ["", "—"],
     ["Astrahus", "Astrahus"],
@@ -46,9 +47,17 @@
 
   const els = {
     configWarning: document.getElementById("configWarning"),
+    viewKeyPanel: document.getElementById("viewKeyPanel"),
+    viewKey: document.getElementById("viewKey"),
+    rememberViewKey: document.getElementById("rememberViewKey"),
+    unlockViewBtn: document.getElementById("unlockViewBtn"),
+    viewStatus: document.getElementById("viewStatus"),
+    boardPanel: document.getElementById("boardPanel"),
     adminPanel: document.getElementById("adminPanel"),
     adminKey: document.getElementById("adminKey"),
     rememberKey: document.getElementById("rememberKey"),
+    newViewKey: document.getElementById("newViewKey"),
+    saveViewKeyBtn: document.getElementById("saveViewKeyBtn"),
     timerInput: document.getElementById("timerInput"),
     addBtn: document.getElementById("addBtn"),
     previewBtn: document.getElementById("previewBtn"),
@@ -85,6 +94,12 @@
       els.rememberKey.checked = true;
     }
 
+    const savedViewKey = localStorage.getItem(VIEW_KEY_STORAGE);
+    if (savedViewKey) {
+      els.viewKey.value = savedViewKey;
+      els.rememberViewKey.checked = true;
+    }
+
     els.addBtn.addEventListener("click", addTimersFromInput);
     els.previewBtn.addEventListener("click", showPreview);
     els.clearInputBtn.addEventListener("click", () => {
@@ -93,6 +108,8 @@
       els.adminStatus.textContent = "";
     });
     els.refreshBtn.addEventListener("click", loadTimers);
+    els.unlockViewBtn.addEventListener("click", unlockView);
+    els.saveViewKeyBtn.addEventListener("click", saveViewKey);
     els.searchInput.addEventListener("input", renderTimers);
     els.sortSelect.addEventListener("change", renderTimers);
     els.showEnded.addEventListener("change", renderTimers);
@@ -107,6 +124,16 @@
       if (els.rememberKey.checked) {
         localStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
       }
+      loadTimers();
+    });
+    els.rememberViewKey.addEventListener("change", () => {
+      if (!els.rememberViewKey.checked) localStorage.removeItem(VIEW_KEY_STORAGE);
+      if (els.rememberViewKey.checked && els.viewKey.value.trim()) {
+        localStorage.setItem(VIEW_KEY_STORAGE, els.viewKey.value.trim());
+      }
+    });
+    els.viewKey.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") unlockView();
     });
 
     loadTimers();
@@ -117,20 +144,108 @@
   async function loadTimers() {
     try {
       if (db) {
-        const { data, error } = await db
-          .from("timers")
-          .select("id, board_id, raw_text, title, system, object_name, structure, owner, distance, mode, end_at, note, created_at")
-          .eq("board_id", BOARD_ID)
-          .order("end_at", { ascending: true });
+        const viewKey = getReadKey();
+        if (!viewKey) {
+          timers = [];
+          renderTimers();
+          showViewGate("Введите ключ просмотра, чтобы открыть доску.", false);
+          return;
+        }
+
+        const { data, error } = await db.rpc("get_timers", {
+          p_board_id: BOARD_ID,
+          p_view_key: viewKey
+        });
 
         if (error) throw error;
+        hideViewGate();
         timers = (data || []).map(normalizeTimer);
       } else {
         timers = readLocalTimers().map(normalizeTimer);
       }
       renderTimers();
     } catch (err) {
-      setStatus(`Ошибка загрузки: ${err.message || err}`, true);
+      const message = friendlyDbError(err);
+      if (/ключ просмотра|get_timers|permission|28000|wrong/i.test(message)) {
+        timers = [];
+        renderTimers();
+        showViewGate(message, true);
+        return;
+      }
+      setStatus(`Ошибка загрузки: ${message}`, true);
+    }
+  }
+
+  function getReadKey() {
+    const adminKey = els.adminKey.value.trim();
+    if (ADMIN_MODE && adminKey) return adminKey;
+    return els.viewKey.value.trim();
+  }
+
+  async function unlockView() {
+    const viewKey = els.viewKey.value.trim();
+    if (!viewKey) {
+      showViewGate("Введи ключ просмотра.", true);
+      return;
+    }
+    if (els.rememberViewKey.checked) {
+      localStorage.setItem(VIEW_KEY_STORAGE, viewKey);
+    }
+    await loadTimers();
+  }
+
+  function showViewGate(message, isError) {
+    if (!db || ADMIN_MODE && els.adminKey.value.trim()) return;
+    els.viewKeyPanel.hidden = false;
+    els.boardPanel.hidden = true;
+    els.viewStatus.textContent = message || "";
+    els.viewStatus.className = `status-line ${isError ? "error" : ""}`;
+  }
+
+  function hideViewGate() {
+    els.viewKeyPanel.hidden = true;
+    els.boardPanel.hidden = false;
+    els.viewStatus.textContent = "";
+    if (els.rememberViewKey.checked && els.viewKey.value.trim()) {
+      localStorage.setItem(VIEW_KEY_STORAGE, els.viewKey.value.trim());
+    }
+  }
+
+  async function saveViewKey() {
+    if (!db) {
+      setStatus("Ключ просмотра нужен только для Supabase-режима.", true);
+      return;
+    }
+
+    const adminKey = els.adminKey.value.trim();
+    const newViewKey = els.newViewKey.value.trim();
+    if (!adminKey) {
+      setStatus("Для смены ключа просмотра нужен админ-ключ.", true);
+      return;
+    }
+    if (newViewKey.length < 6) {
+      setStatus("Ключ просмотра должен быть минимум 6 символов.", true);
+      return;
+    }
+
+    els.saveViewKeyBtn.disabled = true;
+    try {
+      const { error } = await db.rpc("set_timerboard_view_key", {
+        p_board_id: BOARD_ID,
+        p_admin_key: adminKey,
+        p_view_key: newViewKey
+      });
+      if (error) throw error;
+
+      els.newViewKey.value = "";
+      els.viewKey.value = newViewKey;
+      if (els.rememberViewKey.checked) localStorage.setItem(VIEW_KEY_STORAGE, newViewKey);
+      setStatus("Ключ просмотра обновлён.", false);
+      await loadTimers();
+    } catch (err) {
+      setStatus(`Ошибка смены ключа просмотра: ${friendlyDbError(err)}`, true);
+    } finally {
+      els.saveViewKeyBtn.disabled = false;
     }
   }
 
@@ -791,6 +906,10 @@
 
   function friendlyDbError(err) {
     const message = err && (err.message || err.details || err.hint) ? `${err.message || ""} ${err.details || ""} ${err.hint || ""}`.trim() : String(err);
+    if (/wrong view key/i.test(message)) return "неверный ключ просмотра";
+    if (/view key is not configured/i.test(message)) return "ключ просмотра ещё не настроен";
+    if (/set_timerboard_view_key/i.test(message)) return "в Supabase нужно выполнить SQL для ключа просмотра";
+    if (/get_timers/i.test(message)) return "в Supabase нужно выполнить SQL для ключа просмотра";
     if (/wrong admin key|28000|invalid/i.test(message)) return "неверный админ-ключ";
     if (/update_timer_admin_fields/i.test(message)) return "в Supabase нужно добавить функцию update_timer_admin_fields";
     if (/function .* does not exist|schema cache|add_timer/i.test(message)) return "SQL-схема Supabase не установлена или не обновлена";
