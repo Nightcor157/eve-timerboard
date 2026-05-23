@@ -260,7 +260,7 @@
         <div class="preview-card">
           <strong>${escapeHtml(t.system || "—")}</strong>
           <span>${escapeHtml(t.structure || "—")}</span>
-          <small>${escapeHtml(t.title || "—")} · ${escapeHtml(t.owner || "без владельца")} · ${escapeHtml(formatUtc(t.end_at))}</small>
+          <small>${escapeHtml(t.title || "—")} · ${escapeHtml(t.owner || "без альянса")} · ${escapeHtml(formatUtc(t.end_at))}</small>
         </div>
       `).join("");
       els.parsePreview.hidden = false;
@@ -748,7 +748,7 @@
   }
 
   function exportCsv() {
-    const rows = [["system", "object_type", "structure", "title", "owner", "mode", "timer_kind", "end_at_utc", "remaining", "status"]];
+    const rows = [["system", "object_type", "structure", "corporation", "alliance", "mode", "timer_kind", "end_at_utc", "remaining", "status"]];
     const now = Date.now();
     timers
       .slice()
