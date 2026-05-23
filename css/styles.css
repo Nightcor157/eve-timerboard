@@ -292,7 +292,7 @@ button:disabled { opacity: 0.55; cursor: wait; transform: none; }
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1120px;
+  min-width: 1320px;
   font-size: 0.92rem;
 }
 
@@ -310,6 +310,18 @@ th, td {
 th {
   color: #ffffff;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.actions-col,
+td[data-field="actions"] {
+  width: 8.5rem;
+  min-width: 8.5rem;
+  text-align: center;
+}
+
+td[data-field="actions"] .danger-btn {
+  width: 100%;
   white-space: nowrap;
 }
 
