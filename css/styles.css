@@ -76,7 +76,7 @@ body {
 .nav a:hover { border-color: var(--border); background: var(--panel-soft); }
 
 .layout {
-  width: min(1500px, calc(100% - 2rem));
+  width: min(1800px, calc(100% - 1rem));
   margin: 1rem auto 3rem;
 }
 
@@ -292,7 +292,7 @@ button:disabled { opacity: 0.55; cursor: wait; transform: none; }
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1320px;
+  min-width: 1200px;
   font-size: 0.92rem;
 }
 
