@@ -76,8 +76,8 @@ body {
 .nav a:hover { border-color: var(--border); background: var(--panel-soft); }
 
 .layout {
-  width: min(1800px, calc(100% - 1rem));
-  margin: 1rem auto 3rem;
+  width: min(2200px, calc(100% - 0.25rem));
+  margin: 0.5rem auto 3rem;
 }
 
 .panel {
@@ -87,6 +87,10 @@ body {
   box-shadow: 0 18px 40px var(--shadow);
   padding: 1rem;
   margin-bottom: 1rem;
+}
+
+.board {
+  padding: 0.75rem;
 }
 
 .hero {
@@ -392,17 +396,23 @@ tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
 }
 
 .result-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
-  min-width: 12rem;
+  min-width: 11.5rem;
 }
 
 .result-action-btn {
-  flex: 1;
-  min-width: 5.6rem;
   padding: 0.4rem 0.5rem;
   border-radius: 0.5rem;
   opacity: 0.72;
+}
+
+.result-reset-btn {
+  grid-column: 1 / -1;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
 }
 
 .result-action-btn.is-selected-result {

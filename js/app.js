@@ -688,6 +688,17 @@
       group.appendChild(btn);
     }
 
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "result-action-btn result-reset-btn";
+    resetBtn.textContent = "Сброс";
+    resetBtn.disabled = !current;
+    resetBtn.addEventListener("click", async () => {
+      group.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+      await onSave("");
+    });
+    group.appendChild(resetBtn);
+
     cell.textContent = "";
     cell.appendChild(group);
   }
