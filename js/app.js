@@ -29,6 +29,11 @@
     ["Атака", "Атака"],
     ["Оборона", "Оборона"]
   ];
+  const STRUCTURE_RESULT_OPTIONS = [
+    ["", "—"],
+    ["Защищена", "Защищена"],
+    ["Уничтожена", "Уничтожена"]
+  ];
 
   const hasSupabaseConfig = Boolean(
     CONFIG.supabaseUrl &&
@@ -69,6 +74,7 @@
     searchInput: document.getElementById("searchInput"),
     sortSelect: document.getElementById("sortSelect"),
     showEnded: document.getElementById("showEnded"),
+    endedWindow: document.getElementById("endedWindow"),
     refreshBtn: document.getElementById("refreshBtn"),
     exportCsvBtn: document.getElementById("exportCsvBtn"),
     statActive: document.getElementById("statActive"),
@@ -113,6 +119,7 @@
     els.searchInput.addEventListener("input", renderTimers);
     els.sortSelect.addEventListener("change", renderTimers);
     els.showEnded.addEventListener("change", renderTimers);
+    els.endedWindow.addEventListener("change", renderTimers);
     els.exportCsvBtn.addEventListener("click", exportCsv);
     els.rememberKey.addEventListener("change", () => {
       if (!els.rememberKey.checked) localStorage.removeItem(ADMIN_KEY_STORAGE);
@@ -514,6 +521,7 @@
     const search = els.searchInput.value.trim().toLowerCase();
     const sortMode = els.sortSelect.value;
     const showEnded = els.showEnded.checked;
+    const endedWindowMs = getEndedWindowMs();
 
     const enriched = timers.map((timer) => {
       const remainingMs = new Date(timer.end_at).getTime() - now;
@@ -530,7 +538,7 @@
     els.statEnded.textContent = String(endedCount);
 
     const visible = enriched
-      .filter((timer) => showEnded || timer.remainingMs > 0)
+      .filter((timer) => timer.remainingMs > 0 || showEnded && isWithinEndedWindow(timer.remainingMs, endedWindowMs))
       .filter((timer) => !search || searchableText(timer).includes(search))
       .sort((a, b) => compareTimers(a, b, sortMode));
 
@@ -545,17 +553,19 @@
       t.distance,
       t.end_at,
       t.status.label,
+      t.note,
       Math.floor(t.remainingMs / 1000),
       search,
       sortMode,
       showEnded,
+      els.endedWindow.value,
       ADMIN_MODE
     ]));
     if (signature === lastRenderedSignature) return;
     lastRenderedSignature = signature;
 
     if (!visible.length) {
-      els.timersBody.innerHTML = `<tr><td colspan="11" class="empty">Нет таймеров.</td></tr>`;
+      els.timersBody.innerHTML = `<tr><td colspan="12" class="empty">Нет таймеров.</td></tr>`;
       return;
     }
 
@@ -597,6 +607,11 @@
       }
       setCell(row, "remaining", formatRemaining(timer.remainingMs));
       setCell(row, "status", timer.status.label);
+      if (ADMIN_MODE) {
+        setResultButtons(row, "result", normalizeStructureResult(timer.note), (value) => saveTimerAdminFields(timer, { note: value }));
+      } else {
+        setStructureResultCell(row, "result", normalizeStructureResult(timer.note));
+      }
 
       const actionsCell = row.querySelector('[data-field="actions"]');
       if (ADMIN_MODE) {
@@ -633,6 +648,48 @@
     badge.className = `timer-kind-badge ${timerKindClass(kind)}`;
     badge.textContent = kind;
     cell.appendChild(badge);
+  }
+
+  function setStructureResultCell(row, field, value) {
+    const cell = row.querySelector(`[data-field="${field}"]`);
+    if (!cell) return;
+
+    const result = normalizeStructureResult(value);
+    cell.textContent = "";
+    if (!result) {
+      cell.textContent = "—";
+      return;
+    }
+
+    const badge = document.createElement("span");
+    badge.className = `result-badge ${structureResultClass(result)}`;
+    badge.textContent = result;
+    cell.appendChild(badge);
+  }
+
+  function setResultButtons(row, field, value, onSave) {
+    const cell = row.querySelector(`[data-field="${field}"]`);
+    if (!cell) return;
+
+    const current = normalizeStructureResult(value);
+    const group = document.createElement("div");
+    group.className = "result-actions";
+
+    for (const [resultValue, label] of STRUCTURE_RESULT_OPTIONS.filter(([optionValue]) => optionValue)) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `result-action-btn ${structureResultClass(resultValue)} ${current === resultValue ? "is-selected-result" : ""}`;
+      btn.textContent = label;
+      btn.addEventListener("click", async () => {
+        const nextValue = current === resultValue ? "" : resultValue;
+        group.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+        await onSave(nextValue);
+      });
+      group.appendChild(btn);
+    }
+
+    cell.textContent = "";
+    cell.appendChild(group);
   }
 
   function setEditableCell(row, field, value, onSave, placeholder = "") {
@@ -672,7 +729,7 @@
     if (!cell) return;
 
     const select = document.createElement("select");
-    select.className = `table-control table-select ${timerKindClass(value)}`;
+    select.className = `table-control table-select ${timerKindClass(value)} ${structureResultClass(value)}`;
     for (const [optionValue, label] of options) {
       const option = document.createElement("option");
       option.value = optionValue;
@@ -682,8 +739,11 @@
     select.value = options.some(([optionValue]) => optionValue === value) ? value : "";
     select.addEventListener("change", async () => {
       select.classList.remove("is-attack-kind", "is-defense-kind");
+      select.classList.remove("is-defended-result", "is-destroyed-result");
       const nextClass = timerKindClass(select.value);
       if (nextClass) select.classList.add(nextClass);
+      const nextResultClass = structureResultClass(select.value);
+      if (nextResultClass) select.classList.add(nextResultClass);
       select.disabled = true;
       await onChange(select.value);
       select.disabled = false;
@@ -710,7 +770,8 @@
       owner: Object.prototype.hasOwnProperty.call(changes, "owner") ? cleanText(changes.owner) : timer.owner,
       distance: Object.prototype.hasOwnProperty.call(changes, "distance") ? changes.distance : normalizeTimerKind(timer.distance),
       mode: Object.prototype.hasOwnProperty.call(changes, "mode") ? cleanText(changes.mode) : timer.mode,
-      end_at: nextEndAt
+      end_at: nextEndAt,
+      note: Object.prototype.hasOwnProperty.call(changes, "note") ? changes.note : normalizeStructureResult(timer.note)
     };
 
     try {
@@ -733,7 +794,8 @@
           p_owner: updated.owner || "",
           p_timer_kind: normalizeTimerKind(updated.distance),
           p_mode: updated.mode || "",
-          p_end_at: updated.end_at
+          p_end_at: updated.end_at,
+          p_note: normalizeStructureResult(updated.note)
         });
         if (error) throw error;
       } else {
@@ -746,7 +808,8 @@
           owner: updated.owner || "",
           distance: normalizeTimerKind(updated.distance),
           mode: updated.mode || "",
-          end_at: updated.end_at
+          end_at: updated.end_at,
+          note: normalizeStructureResult(updated.note)
         } : item);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
       }
@@ -767,11 +830,36 @@
     return "";
   }
 
+  function normalizeStructureResult(value) {
+    const text = cleanText(value);
+    if (/^защищена$/i.test(text)) return "Защищена";
+    if (/^уничтожена$/i.test(text)) return "Уничтожена";
+    return "";
+  }
+
   function timerKindClass(value) {
     const kind = normalizeTimerKind(value);
     if (kind === "Атака") return "is-attack-kind";
     if (kind === "Оборона") return "is-defense-kind";
     return "";
+  }
+
+  function structureResultClass(value) {
+    const result = normalizeStructureResult(value);
+    if (result === "Защищена") return "is-defended-result";
+    if (result === "Уничтожена") return "is-destroyed-result";
+    return "";
+  }
+
+  function getEndedWindowMs() {
+    if (!els.endedWindow || els.endedWindow.value === "all") return Infinity;
+    const hours = Number(els.endedWindow.value || 24);
+    return Number.isFinite(hours) && hours > 0 ? hours * 3600 * 1000 : 24 * 3600 * 1000;
+  }
+
+  function isWithinEndedWindow(remainingMs, endedWindowMs) {
+    if (remainingMs > 0) return true;
+    return Math.abs(remainingMs) <= endedWindowMs;
   }
 
   function compareTimers(a, b, sortMode) {
@@ -849,7 +937,7 @@
   }
 
   function searchableText(timer) {
-    return [timer.system, normalizeStructureType(timer.object_name), timer.structure, timer.title, timer.owner, timer.mode, normalizeTimerKind(timer.distance), timer.raw_text]
+    return [timer.system, normalizeStructureType(timer.object_name), timer.structure, timer.title, timer.owner, timer.mode, normalizeTimerKind(timer.distance), normalizeStructureResult(timer.note), timer.raw_text]
       .join(" ")
       .toLowerCase();
   }
@@ -863,7 +951,7 @@
   }
 
   function exportCsv() {
-    const rows = [["system", "object_type", "structure", "corporation", "alliance", "mode", "timer_kind", "end_at_utc", "remaining", "status"]];
+    const rows = [["system", "object_type", "structure", "corporation", "alliance", "mode", "timer_kind", "end_at_utc", "remaining", "status", "result"]];
     const now = Date.now();
     timers
       .slice()
@@ -880,7 +968,8 @@
           normalizeTimerKind(timer.distance),
           formatUtc(timer.end_at),
           formatRemaining(remainingMs),
-          getStatus(remainingMs).label
+          getStatus(remainingMs).label,
+          normalizeStructureResult(timer.note)
         ]);
       });
 

@@ -1,5 +1,6 @@
 drop function if exists public.update_timer_admin_fields(text, text, uuid, text, text);
 drop function if exists public.update_timer_admin_fields(text, text, uuid, text, text, text, text, text, text, text, timestamptz);
+drop function if exists public.update_timer_admin_fields(text, text, uuid, text, text, text, text, text, text, text, timestamptz, text);
 
 create or replace function public.update_timer_admin_fields(
   p_board_id text,
@@ -12,7 +13,8 @@ create or replace function public.update_timer_admin_fields(
   p_owner text,
   p_timer_kind text,
   p_mode text,
-  p_end_at timestamptz
+  p_end_at timestamptz,
+  p_note text
 )
 returns public.timers
 language plpgsql
@@ -44,7 +46,11 @@ begin
         else ''
       end,
       mode = coalesce(p_mode, ''),
-      end_at = p_end_at
+      end_at = p_end_at,
+      note = case
+        when coalesce(p_note, '') in ('Защищена', 'Уничтожена') then p_note
+        else ''
+      end
   where board_id = p_board_id and id = p_id
   returning * into v_timer;
 
@@ -57,5 +63,5 @@ end;
 $$;
 
 grant execute on function public.update_timer_admin_fields(
-  text, text, uuid, text, text, text, text, text, text, text, timestamptz
+  text, text, uuid, text, text, text, text, text, text, text, timestamptz, text
 ) to anon, authenticated;

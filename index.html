@@ -123,6 +123,15 @@ Hakatiz - 7-6
             <input id="showEnded" type="checkbox" />
             <span>показывать завершённые</span>
           </label>
+          <label class="toolbar-select">
+            <span>Давность</span>
+            <select id="endedWindow">
+              <option value="24">24ч</option>
+              <option value="72">3 дня</option>
+              <option value="168">7 дней</option>
+              <option value="all">все</option>
+            </select>
+          </label>
           <button id="exportCsvBtn" class="secondary-btn" type="button">CSV</button>
         </div>
       </div>
@@ -141,11 +150,12 @@ Hakatiz - 7-6
               <th>Укреплён до, EVE/UTC</th>
               <th>Осталось</th>
               <th>Статус</th>
+              <th>Итог</th>
               <th class="admin-only actions-col" hidden>Действия</th>
             </tr>
           </thead>
           <tbody id="timersBody">
-            <tr><td colspan="11" class="empty">Загрузка...</td></tr>
+            <tr><td colspan="12" class="empty">Загрузка...</td></tr>
           </tbody>
         </table>
       </div>
@@ -164,12 +174,13 @@ Hakatiz - 7-6
       <td data-field="end_at"></td>
       <td data-field="remaining" class="remaining"></td>
       <td data-field="status"></td>
+      <td data-field="result"></td>
       <td data-field="actions" class="admin-only" hidden></td>
     </tr>
   </template>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20260523-4"></script>
+  <script src="js/app.js?v=20260531-1"></script>
 </body>
 </html>
