@@ -516,6 +516,7 @@
 
   function renderTimers() {
     if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("table-control")) return;
+    if (hasTableTextSelection()) return;
 
     const now = Date.now();
     const search = els.searchInput.value.trim().toLowerCase();
@@ -542,25 +543,25 @@
       .filter((timer) => !search || searchableText(timer).includes(search))
       .sort((a, b) => compareTimers(a, b, sortMode));
 
-    const signature = JSON.stringify(visible.map((t) => [
-      t.id,
-      t.system,
-      t.object_name,
-      t.structure,
-      t.title,
-      t.owner,
-      t.mode,
-      t.distance,
-      t.end_at,
-      t.status.label,
-      t.note,
-      Math.floor(t.remainingMs / 1000),
+    const signature = JSON.stringify({
+      rows: visible.map((t) => [
+        t.id,
+        t.system,
+        t.object_name,
+        t.structure,
+        t.title,
+        t.owner,
+        t.mode,
+        t.distance,
+        t.end_at,
+        t.note
+      ]),
       search,
       sortMode,
       showEnded,
-      els.endedWindow.value,
-      ADMIN_MODE
-    ]));
+      endedWindow: els.endedWindow.value,
+      adminMode: ADMIN_MODE
+    });
     if (signature === lastRenderedSignature) return;
     lastRenderedSignature = signature;
 
@@ -573,6 +574,7 @@
     for (const timer of visible) {
       const row = els.timerRowTemplate.content.firstElementChild.cloneNode(true);
       row.className = timer.status.className;
+      row.dataset.timerId = timer.id;
 
       if (ADMIN_MODE) {
         setEditableCell(row, "system", timer.system, (value) => saveTimerAdminFields(timer, { system: value }));
@@ -898,7 +900,38 @@
   }
 
   function tick() {
+    updateLiveTimerCells();
     renderTimers();
+  }
+
+  function updateLiveTimerCells() {
+    if (hasTableTextSelection()) return;
+
+    const timersById = new Map(timers.map((timer) => [String(timer.id), timer]));
+    const now = Date.now();
+
+    els.timersBody.querySelectorAll("tr[data-timer-id]").forEach((row) => {
+      const timer = timersById.get(row.dataset.timerId);
+      if (!timer) return;
+
+      const remainingMs = new Date(timer.end_at).getTime() - now;
+      const status = getStatus(remainingMs);
+      row.className = status.className;
+      setCell(row, "remaining", formatRemaining(remainingMs));
+      setCell(row, "status", status.label);
+    });
+  }
+
+  function hasTableTextSelection() {
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.isCollapsed) return false;
+
+    const anchor = selection.anchorNode;
+    const focus = selection.focusNode;
+    return Boolean(
+      anchor && els.timersBody.contains(anchor) ||
+      focus && els.timersBody.contains(focus)
+    );
   }
 
   function getStatus(ms) {
