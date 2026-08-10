@@ -516,7 +516,6 @@
 
   function renderTimers() {
     if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("table-control")) return;
-    if (hasTableTextSelection()) return;
 
     const now = Date.now();
     const search = els.searchInput.value.trim().toLowerCase();
@@ -967,8 +966,6 @@
   }
 
   function updateLiveTimerCells() {
-    if (hasTableTextSelection()) return;
-
     const timersById = new Map(timers.map((timer) => [String(timer.id), timer]));
     const now = Date.now();
 
@@ -982,18 +979,6 @@
       setCell(row, "remaining", formatRemaining(remainingMs));
       setCell(row, "status", status.label);
     });
-  }
-
-  function hasTableTextSelection() {
-    const selection = window.getSelection && window.getSelection();
-    if (!selection || selection.isCollapsed) return false;
-
-    const anchor = selection.anchorNode;
-    const focus = selection.focusNode;
-    return Boolean(
-      anchor && els.timersBody.contains(anchor) ||
-      focus && els.timersBody.contains(focus)
-    );
   }
 
   function getStatus(ms) {
