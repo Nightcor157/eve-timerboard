@@ -581,6 +581,7 @@
       } else {
         setCell(row, "system", timer.system || "—");
       }
+      makeSystemCellCopyable(row);
       if (ADMIN_MODE) {
         setSelectCell(row, "object_name", STRUCTURE_TYPE_OPTIONS, normalizeStructureType(timer.object_name), (value) => saveTimerAdminFields(timer, { object_name: value }));
       } else {
@@ -633,6 +634,67 @@
   function setCell(row, field, value) {
     const cell = row.querySelector(`[data-field="${field}"]`);
     if (cell) cell.textContent = value;
+  }
+
+  function makeSystemCellCopyable(row) {
+    const cell = row.querySelector('[data-field="system"]');
+    if (!cell) return;
+
+    const input = cell.querySelector("input");
+    const copySystem = async () => {
+      const system = cleanText(input ? input.value : cell.textContent);
+      if (!system || system === "—") return;
+
+      const copied = await copyTextToClipboard(system);
+      cell.classList.remove("is-copied", "is-copy-failed");
+      cell.classList.add(copied ? "is-copied" : "is-copy-failed");
+      window.setTimeout(() => {
+        cell.classList.remove("is-copied", "is-copy-failed");
+      }, 900);
+    };
+
+    cell.classList.add("copyable-system");
+    cell.title = "Нажмите, чтобы скопировать название системы";
+    cell.addEventListener("click", copySystem);
+
+    if (!input) {
+      cell.tabIndex = 0;
+      cell.setAttribute("role", "button");
+      cell.setAttribute("aria-label", `Скопировать систему ${cleanText(cell.textContent)}`);
+      cell.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        copySystem();
+      });
+    }
+  }
+
+  async function copyTextToClipboard(value) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_error) {
+        // Use the fallback below when clipboard permission is unavailable.
+      }
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (_error) {
+      copied = false;
+    }
+    textarea.remove();
+    return copied;
   }
 
   function setTimerKindCell(row, field, value) {

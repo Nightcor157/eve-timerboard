@@ -334,6 +334,29 @@ tbody tr:nth-child(even) { background: var(--row-alt); }
 tbody tr.is-soon { background: rgba(97, 71, 15, 0.45); }
 tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
 
+td.copyable-system {
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+td.copyable-system:not(:focus-within) {
+  cursor: copy;
+}
+
+td.copyable-system:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+td.copyable-system.is-copied {
+  background: rgba(38, 151, 82, 0.32);
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+td.copyable-system.is-copy-failed {
+  background: rgba(190, 55, 55, 0.3);
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
 .remaining {
   font-variant-numeric: tabular-nums;
   font-weight: 800;
