@@ -391,7 +391,7 @@
         <div class="preview-card">
           <strong>${escapeHtml(t.system || "—")}</strong>
           <span>${escapeHtml(t.object_name || "тип не указан")} · ${escapeHtml(t.structure || "структура не указана")}</span>
-          <small>${escapeHtml(t.title || "без корпорации")} · ${escapeHtml(t.owner || "без альянса")} · ${escapeHtml(t.distance || "тип таймера не указан")} · ${escapeHtml(formatUtc(t.end_at))}</small>
+          <small>${escapeHtml(t.title || "без корпорации")} · ${escapeHtml(t.owner || "без альянса")} · ${escapeHtml(t.mode || "режим не указан")} · ${escapeHtml(t.distance || "тип таймера не указан")} · ${escapeHtml(formatUtc(t.end_at))}</small>
         </div>
       `).join("");
       els.parsePreview.hidden = false;
@@ -415,13 +415,13 @@
     const defaults = getTimerDefaults();
     return {
       ...timer,
-      title: cleanText(timer.title) || defaults.title,
-      system: cleanText(timer.system) || defaults.system,
-      object_name: normalizeStructureType(timer.object_name) || defaults.object_name,
-      structure: cleanText(timer.structure) || defaults.structure,
-      owner: cleanText(timer.owner) || defaults.owner,
-      distance: normalizeTimerKind(timer.distance) || defaults.distance,
-      mode: cleanText(timer.mode) || defaults.mode
+      title: defaults.title || cleanText(timer.title),
+      system: defaults.system || cleanText(timer.system),
+      object_name: defaults.object_name || normalizeStructureType(timer.object_name),
+      structure: defaults.structure || cleanText(timer.structure),
+      owner: defaults.owner || cleanText(timer.owner),
+      distance: defaults.distance || normalizeTimerKind(timer.distance),
+      mode: defaults.mode || cleanText(timer.mode)
     };
   }
 
