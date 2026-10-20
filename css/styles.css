@@ -363,7 +363,7 @@ table {
 }
 
 thead {
-  background: #0f6281;
+  background: #0a465d;
 }
 
 th, td {
@@ -374,14 +374,14 @@ th, td {
 }
 
 th {
-  color: #dce8ed;
-  font-weight: 800;
+  color: #96b0ba;
+  font-weight: 700;
   text-shadow:
-    -0.35px 0 rgba(0, 5, 10, 0.85),
-    0.35px 0 rgba(0, 5, 10, 0.85),
-    0 -0.35px rgba(0, 5, 10, 0.85),
-    0 0.35px rgba(0, 5, 10, 0.85),
-    0 1px 1px rgba(0, 5, 10, 0.55);
+    -0.3px 0 rgba(0, 5, 10, 0.68),
+    0.3px 0 rgba(0, 5, 10, 0.68),
+    0 -0.3px rgba(0, 5, 10, 0.68),
+    0 0.3px rgba(0, 5, 10, 0.68),
+    0 1px 1px rgba(0, 5, 10, 0.4);
   white-space: nowrap;
 }
 
