@@ -35,14 +35,12 @@
     ["Уничтожена", "Уничтожена"]
   ];
   const DEFAULT_REPAIR_DURATION_MS = 15 * 60 * 1000;
-  const REPAIR_DURATION_BY_STRUCTURE_TYPE_MS = new Map([
-    ["Customs Office", 2 * 60 * 60 * 1000]
-  ]);
-  const MANUAL_COMPLETION_STATES = new Map([
-    ["Metenox Moon Drill", { label: "Ручной ремонт", remainingText: "до отметки" }],
-    ["IHub", { label: "Идёт событие", remainingText: "до итога" }],
-    ["TCU", { label: "Идёт событие", remainingText: "до итога" }],
-    ["POS", { label: "Ручной ремонт", remainingText: "до отметки" }]
+  const POST_TIMER_STATES = new Map([
+    ["Customs Office", { durationMs: 2 * 60 * 60 * 1000, label: "Ремонт", className: "is-repair" }],
+    ["Metenox Moon Drill", { durationMs: 30 * 60 * 1000, label: "Ожидание итога", className: "is-pending-result" }],
+    ["IHub", { durationMs: 30 * 60 * 1000, label: "Идёт событие", className: "is-pending-result" }],
+    ["TCU", { durationMs: 30 * 60 * 1000, label: "Идёт событие", className: "is-pending-result" }],
+    ["POS", { durationMs: 30 * 60 * 1000, label: "Ожидание итога", className: "is-pending-result" }]
   ]);
 
   const hasSupabaseConfig = Boolean(
@@ -1066,29 +1064,21 @@
     }
 
     const structureType = normalizeStructureType(timer.object_name);
-    const manualState = MANUAL_COMPLETION_STATES.get(structureType);
-    if (manualState) {
-      return {
-        phase: "pending-result",
-        isCompleted: false,
-        isSoon: false,
-        completedAgeMs: 0,
-        remainingText: manualState.remainingText,
-        status: { label: manualState.label, className: "is-pending-result" }
-      };
-    }
-
-    const repairDurationMs = REPAIR_DURATION_BY_STRUCTURE_TYPE_MS.get(structureType) || DEFAULT_REPAIR_DURATION_MS;
-    const repairEndAtMs = endAtMs + repairDurationMs;
+    const postTimerState = POST_TIMER_STATES.get(structureType) || {
+      durationMs: DEFAULT_REPAIR_DURATION_MS,
+      label: "Ремонт",
+      className: "is-repair"
+    };
+    const repairEndAtMs = endAtMs + postTimerState.durationMs;
     const repairRemainingMs = repairEndAtMs - now;
     if (repairRemainingMs > 0) {
       return {
-        phase: "repair",
+        phase: postTimerState.className === "is-repair" ? "repair" : "pending-result",
         isCompleted: false,
         isSoon: true,
         completedAgeMs: 0,
         remainingText: formatRemaining(repairRemainingMs),
-        status: { label: "Ремонт", className: "is-repair" }
+        status: { label: postTimerState.label, className: postTimerState.className }
       };
     }
 
