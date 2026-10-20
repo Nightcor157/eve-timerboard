@@ -388,6 +388,7 @@ button {
   border-radius: 0.65rem;
   padding: 0.58rem 0.85rem;
   color: var(--text);
+  text-shadow: 0 1px 1px rgba(0, 5, 10, 0.45);
   cursor: pointer;
   transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
@@ -395,8 +396,14 @@ button {
 button:hover { transform: translateY(-1px); }
 button:disabled { opacity: 0.55; cursor: wait; transform: none; }
 
-.primary-btn { background: var(--accent-strong); border-color: rgba(255,255,255,0.08); }
-.primary-btn:hover { background: var(--accent); }
+#adminPanel .primary-btn,
+.primary-btn {
+  color: #d2dee2;
+  background: #176b88;
+  border-color: #2b819f;
+  font-weight: 600;
+}
+.primary-btn:hover { background: #1b7898; }
 .secondary-btn { background: var(--panel-soft); border-color: var(--border); }
 .ghost-btn { background: transparent; border-color: var(--border); }
 .danger-btn { background: rgba(207, 111, 111, 0.09); border-color: rgba(207, 111, 111, 0.32); color: #c09494; }
