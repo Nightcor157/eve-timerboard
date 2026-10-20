@@ -3,13 +3,13 @@
   --panel: #0e2231;
   --panel-soft: #112a3c;
   --border: #244457;
-  --text: #d8e4e9;
+  --text: #afc3ca;
   --muted: #9eb6c7;
   --accent: #27a7d8;
   --accent-strong: #1f84ac;
-  --ok: #72d18d;
-  --warn: #f0c66b;
-  --danger: #ff7a7a;
+  --ok: #65ae79;
+  --warn: #c4a55f;
+  --danger: #cf6f6f;
   --row: #0c1b29;
   --row-alt: #0b1925;
   --shadow: rgba(0, 0, 0, 0.35);
@@ -41,6 +41,8 @@ select {
 
 input::placeholder,
 textarea::placeholder {
+  color: #718b97;
+  opacity: 1;
   text-shadow: none;
 }
 
@@ -146,7 +148,8 @@ textarea::placeholder {
 .stat span {
   display: block;
   font-size: 1.7rem;
-  font-weight: 800;
+  font-weight: 700;
+  color: #afc3ca;
 }
 
 .stat small { color: var(--muted); }
@@ -158,7 +161,7 @@ textarea::placeholder {
 }
 
 code {
-  color: #d8ecff;
+  color: #a8c2cf;
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.08);
   padding: 0.1rem 0.35rem;
@@ -230,14 +233,59 @@ select:focus {
 }
 
 .checkline {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.45rem;
   user-select: none;
 }
 
-.checkline input { width: auto; }
+.checkline input[type="checkbox"] {
+  position: absolute;
+  inset-inline-start: 0;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .checkline.compact { white-space: nowrap; }
+
+.checkbox-box {
+  display: inline-grid;
+  place-content: center;
+  flex: 0 0 0.95rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 1px solid #466879;
+  border-radius: 0.18rem;
+  background: #0a1924;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.checkbox-box::before {
+  content: "";
+  width: 0.58rem;
+  height: 0.58rem;
+  background: #82aebb;
+  clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 16%, 80% 0, 38% 62%);
+  transform: scale(0);
+  transition: transform 0.12s ease;
+}
+
+.checkline input[type="checkbox"]:checked + .checkbox-box {
+  border-color: #608b9d;
+  background: #102d3b;
+}
+
+.checkline input[type="checkbox"]:checked + .checkbox-box::before {
+  transform: scale(1);
+}
+
+.checkline input[type="checkbox"]:focus-visible + .checkbox-box {
+  box-shadow: 0 0 0 2px rgba(96, 139, 157, 0.5);
+}
 
 .admin-actions, .toolbar {
   display: flex;
@@ -351,7 +399,7 @@ button:disabled { opacity: 0.55; cursor: wait; transform: none; }
 .primary-btn:hover { background: var(--accent); }
 .secondary-btn { background: var(--panel-soft); border-color: var(--border); }
 .ghost-btn { background: transparent; border-color: var(--border); }
-.danger-btn { background: rgba(255, 122, 122, 0.12); border-color: rgba(255, 122, 122, 0.4); color: #d9b9b9; }
+.danger-btn { background: rgba(207, 111, 111, 0.09); border-color: rgba(207, 111, 111, 0.32); color: #c09494; }
 
 .preview {
   display: grid;
@@ -435,12 +483,12 @@ tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
 
 tbody tr.is-repair td[data-field="status"],
 tbody tr.is-repair .remaining {
-  color: #9bd8e2;
+  color: #7faab3;
 }
 
 tbody tr.is-pending-result td[data-field="status"],
 tbody tr.is-pending-result .remaining {
-  color: #e2ca8f;
+  color: #ad9c70;
 }
 
 #adminPanel:not([hidden]) ~ #boardPanel tbody tr {
@@ -454,12 +502,12 @@ tbody tr.is-pending-result .remaining {
 
 #adminPanel:not([hidden]) ~ #boardPanel tr.is-repair .remaining,
 #adminPanel:not([hidden]) ~ #boardPanel tr.is-repair td[data-field="status"] {
-  color: #8ebbc4;
+  color: #7faab3;
 }
 
 #adminPanel:not([hidden]) ~ #boardPanel tr.is-pending-result .remaining,
 #adminPanel:not([hidden]) ~ #boardPanel tr.is-pending-result td[data-field="status"] {
-  color: #c4b17f;
+  color: #aa996e;
 }
 
 td.copyable-system {
@@ -487,7 +535,7 @@ td.copyable-system.is-copy-failed {
 
 .remaining {
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -525,31 +573,31 @@ input.table-input:focus {
   border: 1px solid transparent;
   border-radius: 0.5rem;
   padding: 0.32rem 0.55rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .is-attack-kind {
-  color: #d9b9b9;
-  background: rgba(255, 76, 76, 0.24);
-  border-color: rgba(255, 76, 76, 0.55);
+  color: #c09494;
+  background: rgba(190, 78, 78, 0.18);
+  border-color: rgba(190, 78, 78, 0.42);
 }
 
 .is-defense-kind {
-  color: #b9d6c2;
-  background: rgba(80, 190, 118, 0.24);
-  border-color: rgba(80, 190, 118, 0.55);
+  color: #91b19b;
+  background: rgba(72, 151, 98, 0.18);
+  border-color: rgba(72, 151, 98, 0.42);
 }
 
 .is-defended-result {
-  color: #b9d6c2;
-  background: rgba(80, 190, 118, 0.24);
-  border-color: rgba(80, 190, 118, 0.55);
+  color: #91b19b;
+  background: rgba(72, 151, 98, 0.18);
+  border-color: rgba(72, 151, 98, 0.42);
 }
 
 .is-destroyed-result {
-  color: #d9b9b9;
-  background: rgba(255, 76, 76, 0.24);
-  border-color: rgba(255, 76, 76, 0.55);
+  color: #c09494;
+  background: rgba(190, 78, 78, 0.18);
+  border-color: rgba(190, 78, 78, 0.42);
 }
 
 .result-actions {
@@ -574,7 +622,7 @@ input.table-input:focus {
 
 .result-action-btn.is-selected-result {
   opacity: 1;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12) inset;
+  box-shadow: 0 0 0 2px rgba(175, 195, 202, 0.09) inset;
 }
 
 .empty {
