@@ -64,6 +64,14 @@
     newViewKey: document.getElementById("newViewKey"),
     saveViewKeyBtn: document.getElementById("saveViewKeyBtn"),
     timerInput: document.getElementById("timerInput"),
+    defaultSystem: document.getElementById("defaultSystem"),
+    defaultObjectName: document.getElementById("defaultObjectName"),
+    defaultStructure: document.getElementById("defaultStructure"),
+    defaultTitle: document.getElementById("defaultTitle"),
+    defaultOwner: document.getElementById("defaultOwner"),
+    defaultMode: document.getElementById("defaultMode"),
+    defaultTimerKind: document.getElementById("defaultTimerKind"),
+    clearDefaultsBtn: document.getElementById("clearDefaultsBtn"),
     addBtn: document.getElementById("addBtn"),
     previewBtn: document.getElementById("previewBtn"),
     clearInputBtn: document.getElementById("clearInputBtn"),
@@ -108,6 +116,7 @@
 
     els.addBtn.addEventListener("click", addTimersFromInput);
     els.previewBtn.addEventListener("click", showPreview);
+    els.clearDefaultsBtn.addEventListener("click", clearTimerDefaults);
     els.clearInputBtn.addEventListener("click", () => {
       els.timerInput.value = "";
       els.parsePreview.hidden = true;
@@ -283,7 +292,7 @@
 
     let parsed;
     try {
-      parsed = parseInput(raw);
+      parsed = parseInputWithDefaults(raw);
     } catch (err) {
       setStatus(err.message || String(err), true);
       return;
@@ -373,7 +382,7 @@
 
   function showPreview() {
     try {
-      const parsed = parseInput(els.timerInput.value.trim());
+      const parsed = parseInputWithDefaults(els.timerInput.value.trim());
       if (!parsed.length) {
         setStatus("Не нашёл таймеров для проверки.", true);
         return;
@@ -381,8 +390,8 @@
       els.parsePreview.innerHTML = parsed.map((t) => `
         <div class="preview-card">
           <strong>${escapeHtml(t.system || "—")}</strong>
-          <span>${escapeHtml(t.structure || "—")}</span>
-          <small>${escapeHtml(t.title || "—")} · ${escapeHtml(t.owner || "без альянса")} · ${escapeHtml(formatUtc(t.end_at))}</small>
+          <span>${escapeHtml(t.object_name || "тип не указан")} · ${escapeHtml(t.structure || "структура не указана")}</span>
+          <small>${escapeHtml(t.title || "без корпорации")} · ${escapeHtml(t.owner || "без альянса")} · ${escapeHtml(t.distance || "тип таймера не указан")} · ${escapeHtml(formatUtc(t.end_at))}</small>
         </div>
       `).join("");
       els.parsePreview.hidden = false;
@@ -396,6 +405,50 @@
   function parseInput(input) {
     const blocks = splitTimerBlocks(input);
     return blocks.map(parseTimerBlock);
+  }
+
+  function parseInputWithDefaults(input) {
+    return parseInput(input).map(applyTimerDefaults);
+  }
+
+  function applyTimerDefaults(timer) {
+    const defaults = getTimerDefaults();
+    return {
+      ...timer,
+      title: cleanText(timer.title) || defaults.title,
+      system: cleanText(timer.system) || defaults.system,
+      object_name: normalizeStructureType(timer.object_name) || defaults.object_name,
+      structure: cleanText(timer.structure) || defaults.structure,
+      owner: cleanText(timer.owner) || defaults.owner,
+      distance: normalizeTimerKind(timer.distance) || defaults.distance,
+      mode: cleanText(timer.mode) || defaults.mode
+    };
+  }
+
+  function getTimerDefaults() {
+    return {
+      title: cleanText(els.defaultTitle.value),
+      system: cleanText(els.defaultSystem.value),
+      object_name: normalizeStructureType(els.defaultObjectName.value),
+      structure: cleanText(els.defaultStructure.value),
+      owner: cleanText(els.defaultOwner.value),
+      distance: normalizeTimerKind(els.defaultTimerKind.value),
+      mode: cleanText(els.defaultMode.value)
+    };
+  }
+
+  function clearTimerDefaults() {
+    [
+      els.defaultSystem,
+      els.defaultObjectName,
+      els.defaultStructure,
+      els.defaultTitle,
+      els.defaultOwner,
+      els.defaultMode,
+      els.defaultTimerKind
+    ].forEach((control) => { control.value = ""; });
+    els.parsePreview.hidden = true;
+    setStatus("Параметры по умолчанию очищены.", false);
   }
 
   function splitTimerBlocks(input) {

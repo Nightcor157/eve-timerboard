@@ -96,6 +96,66 @@ Hakatiz - 7-6
 В оборонном режиме до 2026.05.22 13:08:10"></textarea>
       </label>
 
+      <div class="timer-defaults">
+        <div class="defaults-heading">
+          <div>
+            <h3>Параметры по умолчанию</h3>
+            <p>Дополняют только пустые поля у всех таймеров из текущей вставки.</p>
+          </div>
+          <button id="clearDefaultsBtn" class="ghost-btn" type="button">Очистить значения</button>
+        </div>
+
+        <div class="defaults-grid">
+          <label>
+            Система
+            <input id="defaultSystem" type="text" placeholder="например, Hakatiz" />
+          </label>
+          <label>
+            Объект
+            <select id="defaultObjectName">
+              <option value="">—</option>
+              <option value="Astrahus">Astrahus</option>
+              <option value="Fortizar">Fortizar</option>
+              <option value="Keepstar">Keepstar</option>
+              <option value="Raitaru">Raitaru</option>
+              <option value="Azbel">Azbel</option>
+              <option value="Sotiyo">Sotiyo</option>
+              <option value="Athanor">Athanor</option>
+              <option value="Tatara">Tatara</option>
+              <option value="Metenox Moon Drill">Metenox Moon Drill</option>
+              <option value="Customs Office">Customs Office</option>
+              <option value="IHub">IHub</option>
+              <option value="TCU">TCU</option>
+              <option value="POS">POS</option>
+            </select>
+          </label>
+          <label>
+            Структура
+            <input id="defaultStructure" type="text" placeholder="название или планета" />
+          </label>
+          <label>
+            Корпорация
+            <input id="defaultTitle" type="text" placeholder="название корпорации" />
+          </label>
+          <label>
+            Альянс
+            <input id="defaultOwner" type="text" placeholder="название альянса" />
+          </label>
+          <label>
+            Режим
+            <input id="defaultMode" type="text" placeholder="например, Reinforced" />
+          </label>
+          <label>
+            Таймер
+            <select id="defaultTimerKind">
+              <option value="">—</option>
+              <option value="Атака">Атака</option>
+              <option value="Оборона">Оборона</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
       <div class="admin-actions">
         <button id="addBtn" class="primary-btn" type="button">Добавить</button>
         <button id="previewBtn" class="secondary-btn" type="button">Проверить парсинг</button>
@@ -181,6 +241,6 @@ Hakatiz - 7-6
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20260810-3"></script>
+  <script src="js/app.js?v=20261020-1"></script>
 </body>
 </html>

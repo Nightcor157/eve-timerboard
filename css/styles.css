@@ -170,7 +170,7 @@ input, textarea, button, select {
   font: inherit;
 }
 
-input[type="search"], input[type="password"], textarea {
+input[type="search"], input[type="password"], input[type="text"], textarea {
   width: 100%;
   color: var(--text);
   background: #081824;
@@ -227,6 +227,52 @@ select:focus {
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.timer-defaults {
+  margin: 1rem 0;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.defaults-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.defaults-heading h3,
+.defaults-heading p {
+  margin: 0;
+}
+
+.defaults-heading h3 {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.defaults-heading p {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.defaults-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(9rem, 1fr));
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.defaults-grid input,
+.defaults-grid select {
+  width: 100%;
+  min-width: 9rem;
+  padding: 0.55rem 0.65rem;
 }
 
 .toolbar { justify-content: flex-end; }
@@ -461,5 +507,19 @@ td.copyable-system.is-copy-failed {
   }
   .toolbar, .toolbar input[type="search"], .toolbar-select, .toolbar-select select {
     width: 100%;
+  }
+  .defaults-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .defaults-grid {
+    grid-template-columns: repeat(2, minmax(9rem, 1fr));
+    overflow-x: visible;
+  }
+}
+
+@media (max-width: 560px) {
+  .defaults-grid {
+    grid-template-columns: 1fr;
   }
 }
