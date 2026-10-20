@@ -453,8 +453,14 @@ thead {
 th, td {
   padding: 0.7rem 0.65rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(96, 139, 157, 0.32);
   text-align: left;
   vertical-align: middle;
+}
+
+th:last-child,
+td:last-child {
+  border-right: 0;
 }
 
 th {
