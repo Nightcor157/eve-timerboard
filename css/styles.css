@@ -277,6 +277,35 @@ select:focus {
   font-size: 0.85rem;
 }
 
+#adminPanel {
+  color: #a2b9c2;
+}
+
+#adminPanel .section-title h2,
+#adminPanel .defaults-heading h3 {
+  color: #afc3ca;
+}
+
+#adminPanel .hint,
+#adminPanel label,
+#adminPanel .defaults-heading p {
+  color: #91aab5;
+}
+
+#adminPanel input[type="password"],
+#adminPanel input[type="text"],
+#adminPanel textarea,
+#adminPanel select,
+#adminPanel button {
+  color: #9fb6bf;
+}
+
+#adminPanel input::placeholder,
+#adminPanel textarea::placeholder {
+  color: #718b97;
+  opacity: 1;
+}
+
 .defaults-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -322,7 +351,7 @@ button:disabled { opacity: 0.55; cursor: wait; transform: none; }
 .primary-btn:hover { background: var(--accent); }
 .secondary-btn { background: var(--panel-soft); border-color: var(--border); }
 .ghost-btn { background: transparent; border-color: var(--border); }
-.danger-btn { background: rgba(255, 122, 122, 0.12); border-color: rgba(255, 122, 122, 0.4); color: #ffd7d7; }
+.danger-btn { background: rgba(255, 122, 122, 0.12); border-color: rgba(255, 122, 122, 0.4); color: #d9b9b9; }
 
 .preview {
   display: grid;
@@ -414,6 +443,25 @@ tbody tr.is-pending-result .remaining {
   color: #e2ca8f;
 }
 
+#adminPanel:not([hidden]) ~ #boardPanel tbody tr {
+  color: #9fb6bf;
+}
+
+#adminPanel:not([hidden]) ~ #boardPanel .remaining,
+#adminPanel:not([hidden]) ~ #boardPanel td[data-field="status"] {
+  color: #afc3ca;
+}
+
+#adminPanel:not([hidden]) ~ #boardPanel tr.is-repair .remaining,
+#adminPanel:not([hidden]) ~ #boardPanel tr.is-repair td[data-field="status"] {
+  color: #8ebbc4;
+}
+
+#adminPanel:not([hidden]) ~ #boardPanel tr.is-pending-result .remaining,
+#adminPanel:not([hidden]) ~ #boardPanel tr.is-pending-result td[data-field="status"] {
+  color: #c4b17f;
+}
+
 td.copyable-system {
   transition: background-color 0.16s ease, box-shadow 0.16s ease;
 }
@@ -447,17 +495,23 @@ td.copyable-system.is-copy-failed {
   width: 100%;
   min-width: 8.5rem;
   padding: 0.45rem 0.55rem;
+  color: #9fb6bf;
 }
 
-.table-input {
-  color: var(--text);
+input.table-input {
+  color: #9fb6bf;
   background: #081824;
   border: 1px solid var(--border);
   border-radius: 0.55rem;
   outline: none;
 }
 
-.table-input:focus {
+input.table-input::placeholder {
+  color: #718b97;
+  opacity: 1;
+}
+
+input.table-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(39, 167, 216, 0.14);
 }
@@ -475,25 +529,25 @@ td.copyable-system.is-copy-failed {
 }
 
 .is-attack-kind {
-  color: #ffe0e0;
+  color: #d9b9b9;
   background: rgba(255, 76, 76, 0.24);
   border-color: rgba(255, 76, 76, 0.55);
 }
 
 .is-defense-kind {
-  color: #dfffe9;
+  color: #b9d6c2;
   background: rgba(80, 190, 118, 0.24);
   border-color: rgba(80, 190, 118, 0.55);
 }
 
 .is-defended-result {
-  color: #dfffe9;
+  color: #b9d6c2;
   background: rgba(80, 190, 118, 0.24);
   border-color: rgba(80, 190, 118, 0.55);
 }
 
 .is-destroyed-result {
-  color: #ffe0e0;
+  color: #d9b9b9;
   background: rgba(255, 76, 76, 0.24);
   border-color: rgba(255, 76, 76, 0.55);
 }
