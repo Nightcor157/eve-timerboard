@@ -400,7 +400,19 @@ td[data-field="actions"] .danger-btn {
 tbody tr { background: var(--row); }
 tbody tr:nth-child(even) { background: var(--row-alt); }
 tbody tr.is-soon { background: rgba(97, 71, 15, 0.45); }
+tbody tr.is-repair { background: rgba(18, 77, 91, 0.5); }
+tbody tr.is-pending-result { background: rgba(93, 68, 18, 0.44); }
 tbody tr.is-ended { color: #8296a5; opacity: 0.75; }
+
+tbody tr.is-repair td[data-field="status"],
+tbody tr.is-repair .remaining {
+  color: #9bd8e2;
+}
+
+tbody tr.is-pending-result td[data-field="status"],
+tbody tr.is-pending-result .remaining {
+  color: #e2ca8f;
+}
 
 td.copyable-system {
   transition: background-color 0.16s ease, box-shadow 0.16s ease;

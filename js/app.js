@@ -34,6 +34,16 @@
     ["Защищена", "Защищена"],
     ["Уничтожена", "Уничтожена"]
   ];
+  const DEFAULT_REPAIR_DURATION_MS = 15 * 60 * 1000;
+  const REPAIR_DURATION_BY_STRUCTURE_TYPE_MS = new Map([
+    ["Customs Office", 2 * 60 * 60 * 1000]
+  ]);
+  const MANUAL_COMPLETION_STATES = new Map([
+    ["Metenox Moon Drill", { label: "Ручной ремонт", remainingText: "до отметки" }],
+    ["IHub", { label: "Идёт событие", remainingText: "до итога" }],
+    ["TCU", { label: "Идёт событие", remainingText: "до итога" }],
+    ["POS", { label: "Ручной ремонт", remainingText: "до отметки" }]
+  ]);
 
   const hasSupabaseConfig = Boolean(
     CONFIG.supabaseUrl &&
@@ -279,7 +289,8 @@
       mode: row.mode || "",
       end_at: row.end_at,
       note: row.note || "",
-      created_at: row.created_at || new Date().toISOString()
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.updated_at || row.created_at || row.end_at
     };
   }
 
@@ -576,22 +587,18 @@
     const showEnded = els.showEnded.checked;
     const endedWindowMs = getEndedWindowMs();
 
-    const enriched = timers.map((timer) => {
-      const remainingMs = new Date(timer.end_at).getTime() - now;
-      const status = getStatus(remainingMs);
-      return { ...timer, remainingMs, status };
-    });
+    const enriched = timers.map((timer) => ({ ...timer, ...getTimerState(timer, now) }));
 
-    const activeCount = enriched.filter((t) => t.remainingMs > 0).length;
-    const soonCount = enriched.filter((t) => t.remainingMs > 0 && t.remainingMs <= 4 * 3600 * 1000).length;
-    const endedCount = enriched.filter((t) => t.remainingMs <= 0).length;
+    const activeCount = enriched.filter((timer) => !timer.isCompleted).length;
+    const soonCount = enriched.filter((timer) => timer.isSoon).length;
+    const endedCount = enriched.filter((timer) => timer.isCompleted).length;
 
     els.statActive.textContent = String(activeCount);
     els.statSoon.textContent = String(soonCount);
     els.statEnded.textContent = String(endedCount);
 
     const visible = enriched
-      .filter((timer) => timer.remainingMs > 0 || showEnded && isWithinEndedWindow(timer.remainingMs, endedWindowMs))
+      .filter((timer) => !timer.isCompleted || showEnded && isWithinEndedWindow(timer.completedAgeMs, endedWindowMs))
       .filter((timer) => !search || searchableText(timer).includes(search))
       .sort((a, b) => compareTimers(a, b, sortMode));
 
@@ -660,7 +667,7 @@
       } else {
         setCell(row, "end_at", formatUtc(timer.end_at));
       }
-      setCell(row, "remaining", formatRemaining(timer.remainingMs));
+      setCell(row, "remaining", timer.remainingText);
       setCell(row, "status", timer.status.label);
       if (ADMIN_MODE) {
         setResultButtons(row, "result", normalizeStructureResult(timer.note), (value) => saveTimerAdminFields(timer, { note: value }));
@@ -936,7 +943,8 @@
           distance: normalizeTimerKind(updated.distance),
           mode: updated.mode || "",
           end_at: updated.end_at,
-          note: normalizeStructureResult(updated.note)
+          note: normalizeStructureResult(updated.note),
+          updated_at: new Date().toISOString()
         } : item);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
       }
@@ -984,9 +992,8 @@
     return Number.isFinite(hours) && hours > 0 ? hours * 3600 * 1000 : 24 * 3600 * 1000;
   }
 
-  function isWithinEndedWindow(remainingMs, endedWindowMs) {
-    if (remainingMs > 0) return true;
-    return Math.abs(remainingMs) <= endedWindowMs;
+  function isWithinEndedWindow(completedAgeMs, endedWindowMs) {
+    return completedAgeMs <= endedWindowMs;
   }
 
   function compareTimers(a, b, sortMode) {
@@ -1026,18 +1033,77 @@
       const timer = timersById.get(row.dataset.timerId);
       if (!timer) return;
 
-      const remainingMs = new Date(timer.end_at).getTime() - now;
-      const status = getStatus(remainingMs);
-      row.className = status.className;
-      setCell(row, "remaining", formatRemaining(remainingMs));
-      setCell(row, "status", status.label);
+      const state = getTimerState(timer, now);
+      row.className = state.status.className;
+      setCell(row, "remaining", state.remainingText);
+      setCell(row, "status", state.status.label);
     });
   }
 
-  function getStatus(ms) {
-    if (ms <= 0) return { label: "Завершён", className: "is-ended" };
-    if (ms <= 4 * 3600 * 1000) return { label: "Скоро", className: "is-soon" };
-    return { label: "Активен", className: "is-active" };
+  function getTimerState(timer, now = Date.now()) {
+    const endAtMs = new Date(timer.end_at).getTime();
+    const mainRemainingMs = endAtMs - now;
+    const result = normalizeStructureResult(timer.note);
+
+    if (result) {
+      const updatedAtMs = new Date(timer.updated_at).getTime();
+      const completedAtMs = Number.isFinite(updatedAtMs) ? Math.max(endAtMs, updatedAtMs) : endAtMs;
+      return completedTimerState(now, completedAtMs);
+    }
+
+    if (mainRemainingMs > 0) {
+      const isSoon = mainRemainingMs <= 4 * 3600 * 1000;
+      return {
+        phase: "active",
+        isCompleted: false,
+        isSoon,
+        completedAgeMs: 0,
+        remainingText: formatRemaining(mainRemainingMs),
+        status: isSoon
+          ? { label: "Скоро", className: "is-soon" }
+          : { label: "Активен", className: "is-active" }
+      };
+    }
+
+    const structureType = normalizeStructureType(timer.object_name);
+    const manualState = MANUAL_COMPLETION_STATES.get(structureType);
+    if (manualState) {
+      return {
+        phase: "pending-result",
+        isCompleted: false,
+        isSoon: false,
+        completedAgeMs: 0,
+        remainingText: manualState.remainingText,
+        status: { label: manualState.label, className: "is-pending-result" }
+      };
+    }
+
+    const repairDurationMs = REPAIR_DURATION_BY_STRUCTURE_TYPE_MS.get(structureType) || DEFAULT_REPAIR_DURATION_MS;
+    const repairEndAtMs = endAtMs + repairDurationMs;
+    const repairRemainingMs = repairEndAtMs - now;
+    if (repairRemainingMs > 0) {
+      return {
+        phase: "repair",
+        isCompleted: false,
+        isSoon: true,
+        completedAgeMs: 0,
+        remainingText: formatRemaining(repairRemainingMs),
+        status: { label: "Ремонт", className: "is-repair" }
+      };
+    }
+
+    return completedTimerState(now, repairEndAtMs);
+  }
+
+  function completedTimerState(now, completedAtMs) {
+    return {
+      phase: "completed",
+      isCompleted: true,
+      isSoon: false,
+      completedAgeMs: Math.max(0, now - completedAtMs),
+      remainingText: "00:00:00",
+      status: { label: "Завершён", className: "is-ended" }
+    };
   }
 
   function formatRemaining(ms) {
@@ -1101,7 +1167,7 @@
       .slice()
       .sort((a, b) => new Date(a.end_at).getTime() - new Date(b.end_at).getTime())
       .forEach((timer) => {
-        const remainingMs = new Date(timer.end_at).getTime() - now;
+        const state = getTimerState(timer, now);
         rows.push([
           timer.system,
           normalizeStructureType(timer.object_name),
@@ -1111,8 +1177,8 @@
           timer.mode,
           normalizeTimerKind(timer.distance),
           formatUtc(timer.end_at),
-          formatRemaining(remainingMs),
-          getStatus(remainingMs).label,
+          state.remainingText,
+          state.status.label,
           normalizeStructureResult(timer.note)
         ]);
       });
