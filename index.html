@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261020-9" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-1" />
 </head>
 <body>
   <header class="topbar">
@@ -13,13 +13,15 @@
       <span>EVE Timerboard</span>
     </div>
     <nav class="nav">
-      <a href="./">Доска</a>
-      <a href="?admin=1">Админ</a>
+      <a id="boardTab" class="nav-tab is-active" href="#board">Доска</a>
+      <a id="routesTab" class="nav-tab" href="#routes">Маршруты</a>
+      <a href="?admin=1#board">Админ</a>
       <button id="refreshBtn" class="ghost-btn" type="button">Обновить</button>
     </nav>
   </header>
 
   <main class="layout">
+    <div id="boardView">
     <section class="panel hero">
       <div>
         <h1>Онлайн-таймеры EVE</h1>
@@ -223,6 +225,129 @@ Hakatiz - 7-6
         </table>
       </div>
     </section>
+    </div>
+
+    <div id="routesView" hidden>
+      <section class="panel route-intro">
+        <div class="section-title">
+          <div>
+            <h1>Карта и маршруты флотов</h1>
+            <p>Общая обстановка и автоматически рассчитанные маршруты к активным таймерам.</p>
+          </div>
+          <div class="segmented-control" aria-label="Режим карты">
+            <button id="generalMapModeBtn" class="is-selected" type="button">Общая карта</button>
+            <button id="fleetMapModeBtn" type="button">Маршруты флотов</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="generalRoutePanel" class="panel">
+        <div class="section-title">
+          <div>
+            <h2>Следующая цель</h2>
+            <span class="hint">Укажи текущую систему, и сайт сравнит активные таймеры.</span>
+          </div>
+        </div>
+        <div class="route-controls">
+          <label>
+            Текущая система
+            <input id="generalOriginSystem" type="text" placeholder="например, Hakatiz" />
+          </label>
+          <label>
+            Секунд на прыжок
+            <input id="generalSecondsPerJump" type="number" min="5" max="3600" value="60" />
+          </label>
+          <button id="buildGeneralRouteBtn" class="primary-btn" type="button">Рассчитать</button>
+        </div>
+        <div id="generalRouteStatus" class="status-line" aria-live="polite"></div>
+      </section>
+
+      <section id="fleetAccessPanel" class="panel">
+        <div class="section-title">
+          <div>
+            <h2>Маршрут флота</h2>
+            <span class="hint">Выбери профиль и введи выданный командиру ключ.</span>
+          </div>
+        </div>
+        <div class="fleet-login-grid">
+          <label>
+            Флот
+            <select id="fleetLoginSelect">
+              <option value="">Выберите флот</option>
+            </select>
+          </label>
+          <label>
+            Ключ флота
+            <input id="fleetLoginKey" type="password" autocomplete="current-password" placeholder="ключ командира флота" />
+          </label>
+          <label class="checkline">
+            <input id="rememberFleetKey" type="checkbox" />
+            <span class="checkbox-box" aria-hidden="true"></span>
+            <span>запомнить в этом браузере</span>
+          </label>
+          <button id="openFleetRouteBtn" class="primary-btn" type="button">Открыть маршрут</button>
+        </div>
+        <div id="fleetLoginStatus" class="status-line" aria-live="polite"></div>
+      </section>
+
+      <section id="fleetAdminPanel" class="panel admin-only" hidden>
+        <div class="section-title">
+          <div>
+            <h2>Управление флотами</h2>
+            <span class="hint">Создание профилей, ключей и общий перерасчёт маршрутов.</span>
+          </div>
+          <button id="calculateFleetRoutesBtn" class="primary-btn" type="button">Рассчитать маршруты</button>
+        </div>
+
+        <div class="fleet-create-grid">
+          <label>
+            Название
+            <input id="newFleetName" type="text" maxlength="60" placeholder="Флот 1" />
+          </label>
+          <label>
+            Текущая система
+            <input id="newFleetSystem" type="text" placeholder="Hakatiz" />
+          </label>
+          <label>
+            Цвет
+            <input id="newFleetColor" type="color" value="#27a7d8" />
+          </label>
+          <label>
+            Секунд на прыжок
+            <input id="newFleetSecondsPerJump" type="number" min="5" max="3600" value="60" />
+          </label>
+          <label>
+            Минут на цели
+            <input id="newFleetServiceMinutes" type="number" min="0" max="240" value="10" />
+          </label>
+          <button id="createFleetBtn" class="secondary-btn" type="button">Создать флот</button>
+        </div>
+
+        <div id="generatedFleetKey" class="generated-key" hidden>
+          <span>Новый ключ:</span>
+          <code id="generatedFleetKeyValue"></code>
+          <button id="copyFleetKeyBtn" class="secondary-btn" type="button">Копировать</button>
+        </div>
+
+        <div id="fleetProfilesList" class="fleet-profiles-list"></div>
+        <div id="fleetAdminStatus" class="status-line" aria-live="polite"></div>
+      </section>
+
+      <section id="routeWorkspace" class="panel route-workspace">
+        <div class="section-title">
+          <div>
+            <h2 id="routeWorkspaceTitle">Операционная карта</h2>
+            <span id="routeWorkspaceHint" class="hint">Рассчитай общий путь или открой маршрут флота.</span>
+          </div>
+          <button id="reloadRouteBtn" class="secondary-btn" type="button">Обновить</button>
+        </div>
+        <div id="routeMap" class="route-map" aria-label="Карта маршрутов">
+          <div class="route-map-empty">Маршрут пока не рассчитан.</div>
+        </div>
+        <div id="routeLegend" class="route-legend"></div>
+        <div id="routeList" class="route-list"></div>
+      </section>
+    </div>
   </main>
 
   <template id="timerRowTemplate">
@@ -245,5 +370,6 @@ Hakatiz - 7-6
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
   <script src="js/app.js?v=20261020-4"></script>
+  <script src="js/routes.js?v=20261024-1"></script>
 </body>
 </html>

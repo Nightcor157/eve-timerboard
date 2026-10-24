@@ -1,0 +1,1082 @@
+(function () {
+  "use strict";
+
+  const CONFIG = window.EVE_TIMERBOARD_CONFIG || {};
+  const BOARD_ID = CONFIG.boardId || "main";
+  const ADMIN_MODE = new URLSearchParams(window.location.search).has("admin");
+  const ESI_BASE = "https://esi.evetech.net";
+  const ESI_COMPATIBILITY_DATE = "2025-09-30";
+  const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
+  const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
+
+  const hasSupabaseConfig = Boolean(
+    CONFIG.supabaseUrl &&
+    CONFIG.supabaseKey &&
+    !String(CONFIG.supabaseUrl).includes("YOUR-PROJECT") &&
+    !String(CONFIG.supabaseKey).includes("YOUR-SUPABASE") &&
+    window.supabase
+  );
+
+  const db = hasSupabaseConfig
+    ? window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey)
+    : null;
+
+  const state = {
+    mapMode: "general",
+    fleets: [],
+    adminFleets: [],
+    routeRows: [],
+    selectedFleetId: "",
+    selectedFleetKey: "",
+    routeCache: new Map(),
+    nameCache: new Map(),
+    idNameCache: new Map(),
+    loadingFleets: false
+  };
+
+  const els = {
+    boardView: document.getElementById("boardView"),
+    routesView: document.getElementById("routesView"),
+    boardTab: document.getElementById("boardTab"),
+    routesTab: document.getElementById("routesTab"),
+    generalMapModeBtn: document.getElementById("generalMapModeBtn"),
+    fleetMapModeBtn: document.getElementById("fleetMapModeBtn"),
+    generalRoutePanel: document.getElementById("generalRoutePanel"),
+    generalOriginSystem: document.getElementById("generalOriginSystem"),
+    generalSecondsPerJump: document.getElementById("generalSecondsPerJump"),
+    buildGeneralRouteBtn: document.getElementById("buildGeneralRouteBtn"),
+    generalRouteStatus: document.getElementById("generalRouteStatus"),
+    fleetAccessPanel: document.getElementById("fleetAccessPanel"),
+    fleetLoginSelect: document.getElementById("fleetLoginSelect"),
+    fleetLoginKey: document.getElementById("fleetLoginKey"),
+    rememberFleetKey: document.getElementById("rememberFleetKey"),
+    openFleetRouteBtn: document.getElementById("openFleetRouteBtn"),
+    fleetLoginStatus: document.getElementById("fleetLoginStatus"),
+    fleetAdminPanel: document.getElementById("fleetAdminPanel"),
+    calculateFleetRoutesBtn: document.getElementById("calculateFleetRoutesBtn"),
+    newFleetName: document.getElementById("newFleetName"),
+    newFleetSystem: document.getElementById("newFleetSystem"),
+    newFleetColor: document.getElementById("newFleetColor"),
+    newFleetSecondsPerJump: document.getElementById("newFleetSecondsPerJump"),
+    newFleetServiceMinutes: document.getElementById("newFleetServiceMinutes"),
+    createFleetBtn: document.getElementById("createFleetBtn"),
+    generatedFleetKey: document.getElementById("generatedFleetKey"),
+    generatedFleetKeyValue: document.getElementById("generatedFleetKeyValue"),
+    copyFleetKeyBtn: document.getElementById("copyFleetKeyBtn"),
+    fleetProfilesList: document.getElementById("fleetProfilesList"),
+    fleetAdminStatus: document.getElementById("fleetAdminStatus"),
+    routeWorkspaceTitle: document.getElementById("routeWorkspaceTitle"),
+    routeWorkspaceHint: document.getElementById("routeWorkspaceHint"),
+    reloadRouteBtn: document.getElementById("reloadRouteBtn"),
+    routeMap: document.getElementById("routeMap"),
+    routeLegend: document.getElementById("routeLegend"),
+    routeList: document.getElementById("routeList"),
+    adminKey: document.getElementById("adminKey"),
+    viewKey: document.getElementById("viewKey"),
+    refreshBtn: document.getElementById("refreshBtn")
+  };
+
+  init();
+
+  function init() {
+    els.generalOriginSystem.value = localStorage.getItem(GENERAL_ORIGIN_KEY) || "";
+
+    els.boardTab.addEventListener("click", () => showMainView("board"));
+    els.routesTab.addEventListener("click", () => showMainView("routes"));
+    window.addEventListener("hashchange", applyHashView);
+
+    els.generalMapModeBtn.addEventListener("click", () => setMapMode("general"));
+    els.fleetMapModeBtn.addEventListener("click", () => setMapMode("fleet"));
+    els.buildGeneralRouteBtn.addEventListener("click", buildGeneralRoute);
+    els.openFleetRouteBtn.addEventListener("click", openSelectedFleetRoute);
+    els.fleetLoginSelect.addEventListener("change", restoreSelectedFleetKey);
+    els.fleetLoginKey.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") openSelectedFleetRoute();
+    });
+    els.rememberFleetKey.addEventListener("change", rememberCurrentFleetKey);
+    els.reloadRouteBtn.addEventListener("click", reloadCurrentRoute);
+
+    els.createFleetBtn.addEventListener("click", createFleet);
+    els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
+    els.copyFleetKeyBtn.addEventListener("click", copyGeneratedFleetKey);
+    els.fleetProfilesList.addEventListener("click", handleFleetProfileAction);
+
+    if (els.adminKey) {
+      els.adminKey.addEventListener("change", () => {
+        if (!els.routesView.hidden) loadRouteData();
+      });
+    }
+
+    setMapMode("general");
+    applyHashView();
+  }
+
+  function applyHashView() {
+    showMainView(window.location.hash === "#routes" ? "routes" : "board", false);
+  }
+
+  function showMainView(view, updateHash = true) {
+    const showRoutes = view === "routes";
+    els.boardView.hidden = showRoutes;
+    els.routesView.hidden = !showRoutes;
+    els.boardTab.classList.toggle("is-active", !showRoutes);
+    els.routesTab.classList.toggle("is-active", showRoutes);
+    if (updateHash) history.replaceState(null, "", showRoutes ? "#routes" : "#board");
+    if (showRoutes) loadRouteData();
+  }
+
+  function setMapMode(mode) {
+    state.mapMode = mode;
+    const general = mode === "general";
+    els.generalMapModeBtn.classList.toggle("is-selected", general);
+    els.fleetMapModeBtn.classList.toggle("is-selected", !general);
+    els.generalRoutePanel.hidden = !general;
+    els.fleetAccessPanel.hidden = general || ADMIN_MODE;
+    els.fleetAdminPanel.hidden = general || !ADMIN_MODE;
+    clearRouteWorkspace(general
+      ? "Укажи исходную систему и рассчитай следующую цель."
+      : ADMIN_MODE
+        ? "Создай флоты или загрузи сохранённые маршруты."
+        : "Выбери флот и введи его ключ.");
+    if (!general) loadRouteData();
+  }
+
+  async function loadRouteData() {
+    if (!db) {
+      setLine(els.fleetLoginStatus, "Для маршрутов требуется настроенный Supabase.", true);
+      setLine(els.fleetAdminStatus, "Для маршрутов требуется настроенный Supabase.", true);
+      return;
+    }
+    if (state.loadingFleets) return;
+    state.loadingFleets = true;
+    try {
+      if (ADMIN_MODE) {
+        const adminKey = getAdminKey();
+        if (!adminKey) {
+          setLine(els.fleetAdminStatus, "Введи главный админ-ключ на вкладке доски.", true);
+          return;
+        }
+        await loadAdminFleets();
+        if (state.mapMode === "fleet") await loadAllFleetRoutes();
+      } else {
+        const readKey = getReadKey();
+        if (!readKey) {
+          setLine(els.fleetLoginStatus, "Сначала открой доску ключом просмотра.", true);
+          return;
+        }
+        await loadPublicFleets();
+      }
+    } catch (err) {
+      const message = friendlyError(err);
+      setLine(els.fleetLoginStatus, message, true);
+      setLine(els.fleetAdminStatus, message, true);
+    } finally {
+      state.loadingFleets = false;
+    }
+  }
+
+  async function loadPublicFleets() {
+    const { data, error } = await db.rpc("list_fleets", {
+      p_board_id: BOARD_ID,
+      p_view_key: getReadKey()
+    });
+    if (error) throw error;
+    state.fleets = data || [];
+    renderFleetSelect();
+    setLine(els.fleetLoginStatus, state.fleets.length ? "" : "Активных флотов пока нет.", false);
+  }
+
+  async function loadAdminFleets() {
+    const { data, error } = await db.rpc("list_fleets_admin", {
+      p_board_id: BOARD_ID,
+      p_admin_key: getAdminKey()
+    });
+    if (error) throw error;
+    state.adminFleets = data || [];
+    state.fleets = state.adminFleets
+      .filter((fleet) => fleet.active)
+      .map((fleet) => ({
+        fleet_id: fleet.fleet_id,
+        fleet_name: fleet.fleet_name,
+        fleet_color: fleet.fleet_color
+      }));
+    renderFleetProfiles();
+    renderFleetSelect();
+    setLine(els.fleetAdminStatus, "", false);
+  }
+
+  function renderFleetSelect() {
+    const selected = els.fleetLoginSelect.value || state.selectedFleetId;
+    els.fleetLoginSelect.innerHTML = '<option value="">Выберите флот</option>' + state.fleets
+      .map((fleet) => `<option value="${escapeHtml(fleet.fleet_id)}">${escapeHtml(fleet.fleet_name)}</option>`)
+      .join("");
+    if (state.fleets.some((fleet) => fleet.fleet_id === selected)) {
+      els.fleetLoginSelect.value = selected;
+    }
+    restoreSelectedFleetKey();
+  }
+
+  function renderFleetProfiles() {
+    if (!state.adminFleets.length) {
+      els.fleetProfilesList.innerHTML = '<div class="empty">Флоты ещё не созданы.</div>';
+      return;
+    }
+
+    els.fleetProfilesList.innerHTML = state.adminFleets.map((fleet) => `
+      <div class="fleet-profile-row" data-fleet-id="${escapeHtml(fleet.fleet_id)}">
+        <label>
+          Название
+          <input data-field="name" type="text" maxlength="60" value="${escapeHtml(fleet.fleet_name)}" />
+        </label>
+        <label>
+          Текущая система
+          <input data-field="system" type="text" value="${escapeHtml(fleet.current_system)}" />
+        </label>
+        <label>
+          Цвет
+          <input data-field="color" type="color" value="${escapeHtml(fleet.fleet_color)}" />
+        </label>
+        <label>
+          Секунд/прыжок
+          <input data-field="seconds" type="number" min="5" max="3600" value="${Number(fleet.seconds_per_jump)}" />
+        </label>
+        <label>
+          Минут на цели
+          <input data-field="service" type="number" min="0" max="240" value="${Number(fleet.service_minutes)}" />
+        </label>
+        <div>
+          <label class="checkline">
+            <input data-field="active" type="checkbox" ${fleet.active ? "checked" : ""} />
+            <span class="checkbox-box" aria-hidden="true"></span>
+            <span>активен</span>
+          </label>
+          <div class="fleet-key-hint">Ключ: ••••${escapeHtml(fleet.key_hint || "")}</div>
+          <div class="fleet-profile-actions">
+            <button data-action="save" class="secondary-btn" type="button">Сохранить</button>
+            <button data-action="rotate" class="ghost-btn" type="button">Новый ключ</button>
+            <button data-action="delete" class="danger-btn" type="button">Удалить</button>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  async function createFleet() {
+    const adminKey = getAdminKey();
+    if (!adminKey) {
+      setLine(els.fleetAdminStatus, "Нужен главный админ-ключ.", true);
+      return;
+    }
+    const name = els.newFleetName.value.trim();
+    const system = els.newFleetSystem.value.trim();
+    if (!name || !system) {
+      setLine(els.fleetAdminStatus, "Укажи название и текущую систему флота.", true);
+      return;
+    }
+
+    els.createFleetBtn.disabled = true;
+    try {
+      const { data, error } = await db.rpc("create_fleet", {
+        p_board_id: BOARD_ID,
+        p_admin_key: adminKey,
+        p_name: name,
+        p_color: els.newFleetColor.value,
+        p_current_system: system,
+        p_seconds_per_jump: boundedNumber(els.newFleetSecondsPerJump.value, 5, 3600, 60),
+        p_service_minutes: boundedNumber(els.newFleetServiceMinutes.value, 0, 240, 10)
+      });
+      if (error) throw error;
+      const created = data && data[0];
+      if (created) showGeneratedKey(created.generated_key, created.fleet_name);
+      els.newFleetName.value = "";
+      els.newFleetSystem.value = "";
+      setLine(els.fleetAdminStatus, `Флот «${name}» создан. Скопируй ключ сейчас.`, false);
+      await loadAdminFleets();
+    } catch (err) {
+      setLine(els.fleetAdminStatus, `Ошибка создания: ${friendlyError(err)}`, true);
+    } finally {
+      els.createFleetBtn.disabled = false;
+    }
+  }
+
+  async function handleFleetProfileAction(event) {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const row = button.closest(".fleet-profile-row");
+    if (!row) return;
+    const fleetId = row.dataset.fleetId;
+    const action = button.dataset.action;
+    if (action === "save") await saveFleetProfile(row, fleetId, button);
+    if (action === "rotate") await rotateFleetKey(fleetId, button);
+    if (action === "delete") await deleteFleetProfile(fleetId, button);
+  }
+
+  async function saveFleetProfile(row, fleetId, button) {
+    button.disabled = true;
+    try {
+      const { error } = await db.rpc("update_fleet", {
+        p_board_id: BOARD_ID,
+        p_admin_key: getAdminKey(),
+        p_fleet_id: fleetId,
+        p_name: row.querySelector('[data-field="name"]').value.trim(),
+        p_color: row.querySelector('[data-field="color"]').value,
+        p_current_system: row.querySelector('[data-field="system"]').value.trim(),
+        p_seconds_per_jump: boundedNumber(row.querySelector('[data-field="seconds"]').value, 5, 3600, 60),
+        p_service_minutes: boundedNumber(row.querySelector('[data-field="service"]').value, 0, 240, 10),
+        p_active: row.querySelector('[data-field="active"]').checked
+      });
+      if (error) throw error;
+      setLine(els.fleetAdminStatus, "Профиль флота сохранён. Для нового пути запусти перерасчёт.", false);
+      await loadAdminFleets();
+    } catch (err) {
+      setLine(els.fleetAdminStatus, `Ошибка сохранения: ${friendlyError(err)}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function rotateFleetKey(fleetId, button) {
+    if (!window.confirm("Выпустить новый ключ? Старый ключ сразу перестанет работать.")) return;
+    button.disabled = true;
+    try {
+      const { data, error } = await db.rpc("rotate_fleet_key", {
+        p_board_id: BOARD_ID,
+        p_admin_key: getAdminKey(),
+        p_fleet_id: fleetId
+      });
+      if (error) throw error;
+      const rotated = data && data[0];
+      const fleet = state.adminFleets.find((item) => item.fleet_id === fleetId);
+      if (rotated) showGeneratedKey(rotated.generated_key, fleet ? fleet.fleet_name : "флот");
+      setLine(els.fleetAdminStatus, "Новый ключ выпущен. Скопируй его сейчас.", false);
+      await loadAdminFleets();
+    } catch (err) {
+      setLine(els.fleetAdminStatus, `Ошибка смены ключа: ${friendlyError(err)}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deleteFleetProfile(fleetId, button) {
+    const fleet = state.adminFleets.find((item) => item.fleet_id === fleetId);
+    if (!window.confirm(`Удалить профиль «${fleet ? fleet.fleet_name : "флот"}» и его назначения?`)) return;
+    button.disabled = true;
+    try {
+      const { error } = await db.rpc("delete_fleet", {
+        p_board_id: BOARD_ID,
+        p_admin_key: getAdminKey(),
+        p_fleet_id: fleetId
+      });
+      if (error) throw error;
+      setLine(els.fleetAdminStatus, "Профиль флота удалён.", false);
+      await loadAdminFleets();
+      await loadAllFleetRoutes();
+    } catch (err) {
+      setLine(els.fleetAdminStatus, `Ошибка удаления: ${friendlyError(err)}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function showGeneratedKey(key, fleetName) {
+    els.generatedFleetKey.hidden = false;
+    els.generatedFleetKeyValue.textContent = `${fleetName}: ${key}`;
+  }
+
+  async function copyGeneratedFleetKey() {
+    const text = els.generatedFleetKeyValue.textContent;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setLine(els.fleetAdminStatus, "Ключ скопирован.", false);
+    } catch (_err) {
+      setLine(els.fleetAdminStatus, "Не удалось скопировать автоматически. Выдели ключ вручную.", true);
+    }
+  }
+
+  async function calculateFleetRoutes() {
+    if (!getAdminKey()) {
+      setLine(els.fleetAdminStatus, "Нужен главный админ-ключ.", true);
+      return;
+    }
+    const fleets = state.adminFleets.filter((fleet) => fleet.active);
+    if (!fleets.length) {
+      setLine(els.fleetAdminStatus, "Создай и включи хотя бы один флот.", true);
+      return;
+    }
+
+    els.calculateFleetRoutesBtn.disabled = true;
+    setLine(els.fleetAdminStatus, "Загружаю таймеры и рассчитываю переходы ESI…", false);
+    try {
+      const timers = await loadTimersForRoutes(getAdminKey());
+      const targets = activeRouteTargets(timers);
+      if (!targets.length) {
+        throw new Error("Нет будущих активных таймеров с указанной системой.");
+      }
+
+      const resolved = await resolveSystemNames([
+        ...fleets.map((fleet) => fleet.current_system),
+        ...targets.map((timer) => timer.system)
+      ]);
+
+      const fleetStates = fleets.map((fleet) => {
+        const system = resolved.get(normalizeName(fleet.current_system));
+        if (!system) throw new Error(`Система флота не найдена в ESI: ${fleet.current_system}`);
+        return {
+          fleet,
+          currentId: system.id,
+          availableAt: Date.now(),
+          order: 0
+        };
+      });
+
+      const assignments = [];
+      const sortedTargets = targets.slice().sort((a, b) => new Date(a.end_at) - new Date(b.end_at));
+      for (let index = 0; index < sortedTargets.length; index += 1) {
+        const timer = sortedTargets[index];
+        setLine(
+          els.fleetAdminStatus,
+          `Расчёт цели ${index + 1} из ${sortedTargets.length}: ${timer.system}…`,
+          false
+        );
+        const targetSystem = resolved.get(normalizeName(timer.system));
+        if (!targetSystem) throw new Error(`Система таймера не найдена в ESI: ${timer.system}`);
+
+        const options = await Promise.all(fleetStates.map(async (fleetState) => {
+          const routeIds = await getEsiRoute(fleetState.currentId, targetSystem.id);
+          const jumps = Math.max(0, routeIds.length - 1);
+          const arrivalAt = fleetState.availableAt + jumps * Number(fleetState.fleet.seconds_per_jump) * 1000;
+          const deadline = new Date(timer.end_at).getTime();
+          const lateness = Math.max(0, arrivalAt - deadline);
+          return { fleetState, routeIds, jumps, arrivalAt, lateness };
+        }));
+
+        options.sort((a, b) => {
+          if (Boolean(a.lateness) !== Boolean(b.lateness)) return a.lateness ? 1 : -1;
+          if (a.lateness !== b.lateness) return a.lateness - b.lateness;
+          if (a.arrivalAt !== b.arrivalAt) return a.arrivalAt - b.arrivalAt;
+          return a.jumps - b.jumps;
+        });
+
+        const best = options[0];
+        best.fleetState.order += 1;
+        assignments.push({
+          fleet_id: best.fleetState.fleet.fleet_id,
+          timer_id: timer.id,
+          route_order: best.fleetState.order,
+          jump_count: best.jumps,
+          eta_at: new Date(best.arrivalAt).toISOString(),
+          route_ids: best.routeIds
+        });
+
+        const deadline = new Date(timer.end_at).getTime();
+        best.fleetState.availableAt = Math.max(best.arrivalAt, deadline) +
+          Number(best.fleetState.fleet.service_minutes) * 60 * 1000;
+        best.fleetState.currentId = targetSystem.id;
+      }
+
+      const routeIds = [...new Set(assignments.flatMap((item) => item.route_ids))];
+      const routeNames = await resolveIdsToNames(routeIds);
+      const payload = assignments.map((item) => ({
+        fleet_id: item.fleet_id,
+        timer_id: item.timer_id,
+        route_order: item.route_order,
+        jump_count: item.jump_count,
+        eta_at: item.eta_at,
+        route_nodes: item.route_ids.map((id) => ({ id, name: routeNames.get(Number(id)) || String(id) }))
+      }));
+
+      const { data, error } = await db.rpc("replace_fleet_assignments", {
+        p_board_id: BOARD_ID,
+        p_admin_key: getAdminKey(),
+        p_assignments: payload
+      });
+      if (error) throw error;
+      setLine(els.fleetAdminStatus, `Маршруты рассчитаны. Назначено целей: ${Number(data || payload.length)}.`, false);
+      await loadAllFleetRoutes();
+    } catch (err) {
+      setLine(els.fleetAdminStatus, `Расчёт не сохранён: ${friendlyError(err)}`, true);
+    } finally {
+      els.calculateFleetRoutesBtn.disabled = false;
+    }
+  }
+
+  async function buildGeneralRoute() {
+    const origin = els.generalOriginSystem.value.trim();
+    const secondsPerJump = boundedNumber(els.generalSecondsPerJump.value, 5, 3600, 60);
+    if (!origin) {
+      setLine(els.generalRouteStatus, "Укажи текущую систему.", true);
+      return;
+    }
+    const readKey = getReadKey();
+    if (!readKey) {
+      setLine(els.generalRouteStatus, "Сначала открой доску ключом просмотра.", true);
+      return;
+    }
+
+    els.buildGeneralRouteBtn.disabled = true;
+    setLine(els.generalRouteStatus, "Сравниваю активные таймеры…", false);
+    try {
+      const timers = await loadTimersForRoutes(readKey);
+      const targets = activeRouteTargets(timers);
+      if (!targets.length) throw new Error("Нет будущих активных таймеров с указанной системой.");
+
+      const resolved = await resolveSystemNames([origin, ...targets.map((timer) => timer.system)]);
+      const originSystem = resolved.get(normalizeName(origin));
+      if (!originSystem) throw new Error(`Система не найдена в ESI: ${origin}`);
+
+      const candidates = await mapLimit(targets, 4, async (timer) => {
+        const targetSystem = resolved.get(normalizeName(timer.system));
+        if (!targetSystem) return null;
+        const routeIds = await getEsiRoute(originSystem.id, targetSystem.id);
+        const jumps = Math.max(0, routeIds.length - 1);
+        const eta = Date.now() + jumps * secondsPerJump * 1000;
+        return {
+          timer,
+          targetSystem,
+          routeIds,
+          jumps,
+          eta,
+          marginMs: new Date(timer.end_at).getTime() - eta
+        };
+      });
+
+      const valid = candidates.filter(Boolean).sort((a, b) => {
+        const aLate = a.marginMs < 0;
+        const bLate = b.marginMs < 0;
+        if (aLate !== bLate) return aLate ? 1 : -1;
+        if (aLate && bLate) return b.marginMs - a.marginMs || a.jumps - b.jumps;
+        return a.marginMs - b.marginMs || a.jumps - b.jumps;
+      });
+      if (!valid.length) throw new Error("Не удалось построить путь ни к одной цели.");
+      const recommended = valid[0];
+      const names = await resolveIdsToNames(recommended.routeIds);
+      const nodes = recommended.routeIds.map((id) => ({ id, name: names.get(Number(id)) || String(id) }));
+
+      localStorage.setItem(GENERAL_ORIGIN_KEY, origin);
+      renderRouteMap([{
+        name: `${origin} → ${recommended.timer.system}`,
+        color: "#27a7d8",
+        nodes,
+        targetIds: new Set([Number(recommended.targetSystem.id)])
+      }]);
+      renderGeneralCandidates(valid, recommended, secondsPerJump);
+      els.routeWorkspaceTitle.textContent = `Следующая цель: ${recommended.timer.system}`;
+      els.routeWorkspaceHint.textContent = `${recommended.jumps} прыжков, ETA ${formatUtc(recommended.eta)}, запас ${formatSignedDuration(recommended.marginMs)}`;
+      setLine(els.generalRouteStatus, `Рекомендуемая следующая цель: ${recommended.timer.system}.`, false);
+    } catch (err) {
+      setLine(els.generalRouteStatus, friendlyError(err), true);
+    } finally {
+      els.buildGeneralRouteBtn.disabled = false;
+    }
+  }
+
+  function renderGeneralCandidates(candidates, recommended, secondsPerJump) {
+    els.routeLegend.innerHTML = `
+      <span class="route-legend-item">
+        <span class="route-legend-swatch" style="--fleet-color:#27a7d8"></span>
+        ${escapeHtml(recommended.timer.system)}
+      </span>`;
+
+    els.routeList.innerHTML = `
+      <div class="route-recommendation">
+        <div><strong>${escapeHtml(recommended.timer.system)}</strong><span>рекомендуемая следующая цель</span></div>
+        <div><strong>${recommended.jumps}</strong><span>прыжков</span></div>
+        <div><strong>${escapeHtml(formatUtc(recommended.eta))}</strong><span>ETA, EVE/UTC</span></div>
+        <div><strong class="route-margin ${recommended.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(recommended.marginMs))}</strong><span>запас</span></div>
+      </div>
+      ${candidates.slice(0, 20).map((candidate, index) => `
+        <div class="route-list-row ${candidate.marginMs < 0 ? "is-late" : ""}">
+          <div class="route-list-order">${index + 1}</div>
+          <div><div class="route-list-system">${escapeHtml(candidate.timer.system)}</div><div class="route-list-meta">${escapeHtml(candidate.timer.object_name || "объект не указан")}</div></div>
+          <div>${escapeHtml(candidate.timer.structure || "—")}</div>
+          <div>${candidate.jumps} прыжков</div>
+          <div>${escapeHtml(formatUtc(candidate.eta))}</div>
+          <div class="route-margin ${candidate.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(candidate.marginMs))}</div>
+          <div class="route-list-meta">${secondsPerJump} сек/прыжок</div>
+        </div>
+      `).join("")}`;
+  }
+
+  function restoreSelectedFleetKey() {
+    const fleetId = els.fleetLoginSelect.value;
+    state.selectedFleetId = fleetId;
+    if (!fleetId) {
+      els.fleetLoginKey.value = "";
+      els.rememberFleetKey.checked = false;
+      return;
+    }
+    const saved = localStorage.getItem(FLEET_KEY_PREFIX + fleetId) || "";
+    els.fleetLoginKey.value = saved;
+    els.rememberFleetKey.checked = Boolean(saved);
+  }
+
+  function rememberCurrentFleetKey() {
+    const fleetId = els.fleetLoginSelect.value;
+    if (!fleetId) return;
+    if (els.rememberFleetKey.checked && els.fleetLoginKey.value.trim()) {
+      localStorage.setItem(FLEET_KEY_PREFIX + fleetId, els.fleetLoginKey.value.trim());
+    } else {
+      localStorage.removeItem(FLEET_KEY_PREFIX + fleetId);
+    }
+  }
+
+  async function openSelectedFleetRoute() {
+    const fleetId = els.fleetLoginSelect.value;
+    const fleetKey = els.fleetLoginKey.value.trim();
+    if (!fleetId || !fleetKey) {
+      setLine(els.fleetLoginStatus, "Выбери флот и введи его ключ.", true);
+      return;
+    }
+
+    els.openFleetRouteBtn.disabled = true;
+    try {
+      const { data, error } = await db.rpc("get_fleet_route", {
+        p_board_id: BOARD_ID,
+        p_fleet_id: fleetId,
+        p_fleet_key: fleetKey
+      });
+      if (error) throw error;
+      state.selectedFleetId = fleetId;
+      state.selectedFleetKey = fleetKey;
+      state.routeRows = data || [];
+      rememberCurrentFleetKey();
+      const fleet = state.fleets.find((item) => item.fleet_id === fleetId);
+      renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
+      setLine(els.fleetLoginStatus, "Маршрут открыт.", false);
+    } catch (err) {
+      state.selectedFleetKey = "";
+      setLine(els.fleetLoginStatus, friendlyError(err), true);
+    } finally {
+      els.openFleetRouteBtn.disabled = false;
+    }
+  }
+
+  async function loadAllFleetRoutes() {
+    if (!getAdminKey()) return;
+    const { data, error } = await db.rpc("get_all_fleet_routes", {
+      p_board_id: BOARD_ID,
+      p_admin_key: getAdminKey()
+    });
+    if (error) throw error;
+    state.routeRows = data || [];
+    renderFleetRoutes(state.routeRows, "Все флоты");
+  }
+
+  function renderFleetRoutes(rows, title) {
+    els.routeWorkspaceTitle.textContent = title;
+    if (!rows.length) {
+      els.routeWorkspaceHint.textContent = "Сохранённых назначений пока нет.";
+      clearRouteWorkspace("Маршрут пуст. Главный администратор должен выполнить расчёт.", false);
+      return;
+    }
+
+    const groups = new Map();
+    for (const row of rows) {
+      if (!groups.has(row.fleet_id)) {
+        groups.set(row.fleet_id, {
+          id: row.fleet_id,
+          name: row.fleet_name,
+          color: row.fleet_color || "#27a7d8",
+          rows: []
+        });
+      }
+      groups.get(row.fleet_id).rows.push(row);
+    }
+
+    const routes = [...groups.values()].map((group) => {
+      const nodes = [];
+      const seenSequence = [];
+      for (const row of group.rows.sort((a, b) => a.route_order - b.route_order)) {
+        const segment = Array.isArray(row.route_nodes) ? row.route_nodes : [];
+        for (const node of segment) {
+          const normalized = { id: Number(node.id), name: String(node.name || node.id) };
+          if (!seenSequence.length || seenSequence[seenSequence.length - 1].id !== normalized.id) {
+            seenSequence.push(normalized);
+          }
+        }
+      }
+      nodes.push(...seenSequence);
+      return {
+        name: group.name,
+        color: group.color,
+        nodes,
+        targetIds: new Set(group.rows.map((row) => {
+          const segment = Array.isArray(row.route_nodes) ? row.route_nodes : [];
+          const last = segment[segment.length - 1];
+          return last ? Number(last.id) : -1;
+        }))
+      };
+    });
+
+    renderRouteMap(routes);
+    els.routeLegend.innerHTML = [...groups.values()].map((group) => `
+      <span class="route-legend-item">
+        <span class="route-legend-swatch" style="--fleet-color:${safeColor(group.color)}"></span>
+        ${escapeHtml(group.name)}
+      </span>
+    `).join("");
+    els.routeWorkspaceHint.textContent = `Назначено целей: ${rows.length}.`;
+    renderFleetRouteRows(rows);
+  }
+
+  function renderFleetRouteRows(rows) {
+    const sorted = rows.slice().sort((a, b) => String(a.fleet_name).localeCompare(String(b.fleet_name), "ru") || a.route_order - b.route_order);
+    els.routeList.innerHTML = sorted.map((row) => {
+      const marginMs = new Date(row.end_at).getTime() - new Date(row.eta_at).getTime();
+      return `
+        <div class="route-list-row ${marginMs < 0 ? "is-late" : ""}" data-timer-id="${escapeHtml(row.timer_id)}" data-fleet-id="${escapeHtml(row.fleet_id)}">
+          <div class="route-list-order">${Number(row.route_order)}</div>
+          <div><div class="route-list-system">${escapeHtml(row.timer_system)}</div><div class="route-list-meta">${escapeHtml(row.fleet_name)}</div></div>
+          <div><div>${escapeHtml(row.object_name || "—")}</div><div class="route-list-meta">${escapeHtml(row.structure || "")}</div></div>
+          <div>${Number(row.jump_count)} прыжков</div>
+          <div><div>${escapeHtml(formatUtc(row.eta_at))}</div><div class="route-list-meta">таймер ${escapeHtml(formatUtc(row.end_at))}</div></div>
+          <div class="route-margin ${marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(marginMs))}</div>
+          <div class="route-result-actions">
+            <button class="result-action-btn is-defended-result" data-result="Защищена" type="button">Защищена</button>
+            <button class="result-action-btn is-destroyed-result" data-result="Уничтожена" type="button">Уничтожена</button>
+            <button class="result-reset-btn" data-result="" type="button">Сбросить</button>
+          </div>
+        </div>`;
+    }).join("");
+
+    els.routeList.querySelectorAll("button[data-result]").forEach((button) => {
+      button.addEventListener("click", setRouteTimerResult);
+    });
+  }
+
+  async function setRouteTimerResult(event) {
+    const button = event.currentTarget;
+    const row = button.closest(".route-list-row");
+    const timerId = row.dataset.timerId;
+    const fleetId = row.dataset.fleetId;
+    const result = button.dataset.result;
+    const accessKey = ADMIN_MODE ? getAdminKey() : state.selectedFleetKey;
+    if (!accessKey) {
+      setLine(els.fleetLoginStatus, "Сессия флота не открыта.", true);
+      return;
+    }
+
+    row.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+    try {
+      const { error } = await db.rpc("set_fleet_timer_result", {
+        p_board_id: BOARD_ID,
+        p_access_key: accessKey,
+        p_fleet_id: ADMIN_MODE ? null : fleetId,
+        p_timer_id: timerId,
+        p_result: result
+      });
+      if (error) throw error;
+      const statusElement = ADMIN_MODE ? els.fleetAdminStatus : els.fleetLoginStatus;
+      setLine(statusElement, result ? `Результат установлен: ${result}.` : "Результат сброшен.", false);
+      if (els.refreshBtn) els.refreshBtn.click();
+      await reloadCurrentRoute();
+    } catch (err) {
+      const statusElement = ADMIN_MODE ? els.fleetAdminStatus : els.fleetLoginStatus;
+      setLine(statusElement, `Ошибка результата: ${friendlyError(err)}`, true);
+      row.querySelectorAll("button").forEach((item) => { item.disabled = false; });
+    }
+  }
+
+  async function reloadCurrentRoute() {
+    try {
+      if (state.mapMode === "general") {
+        if (els.generalOriginSystem.value.trim()) await buildGeneralRoute();
+        return;
+      }
+      if (ADMIN_MODE) {
+        await loadAdminFleets();
+        await loadAllFleetRoutes();
+      } else if (state.selectedFleetId && state.selectedFleetKey) {
+        els.fleetLoginSelect.value = state.selectedFleetId;
+        els.fleetLoginKey.value = state.selectedFleetKey;
+        await openSelectedFleetRoute();
+      } else {
+        await loadPublicFleets();
+      }
+    } catch (err) {
+      const statusElement = ADMIN_MODE ? els.fleetAdminStatus : els.fleetLoginStatus;
+      setLine(statusElement, friendlyError(err), true);
+    }
+  }
+
+  async function loadTimersForRoutes(accessKey) {
+    const { data, error } = await db.rpc("get_timers", {
+      p_board_id: BOARD_ID,
+      p_view_key: accessKey
+    });
+    if (error) throw error;
+    return data || [];
+  }
+
+  function activeRouteTargets(timers) {
+    const now = Date.now();
+    const seen = new Set();
+    return timers.filter((timer) => {
+      const key = timer.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return !normalizeResult(timer.note) &&
+        String(timer.system || "").trim() &&
+        new Date(timer.end_at).getTime() > now;
+    });
+  }
+
+  async function resolveSystemNames(names) {
+    const uniqueNames = [...new Set(names.map((name) => String(name || "").trim()).filter(Boolean))];
+    const missing = uniqueNames.filter((name) => !state.nameCache.has(normalizeName(name)));
+    if (missing.length) {
+      const data = await fetchJson(`${ESI_BASE}/latest/universe/ids/?datasource=tranquility&language=en`, {
+        method: "POST",
+        body: JSON.stringify(missing)
+      });
+      for (const system of data.systems || []) {
+        const normalized = { id: Number(system.id), name: system.name };
+        state.nameCache.set(normalizeName(system.name), normalized);
+        state.idNameCache.set(normalized.id, normalized.name);
+      }
+    }
+    return state.nameCache;
+  }
+
+  async function resolveIdsToNames(ids) {
+    const uniqueIds = [...new Set(ids.map(Number).filter(Number.isFinite))];
+    const missing = uniqueIds.filter((id) => !state.idNameCache.has(id));
+    for (let index = 0; index < missing.length; index += 1000) {
+      const chunk = missing.slice(index, index + 1000);
+      const data = await fetchJson(`${ESI_BASE}/latest/universe/names/?datasource=tranquility`, {
+        method: "POST",
+        body: JSON.stringify(chunk)
+      });
+      for (const item of data || []) {
+        if (item.category === "solar_system") state.idNameCache.set(Number(item.id), item.name);
+      }
+    }
+    return state.idNameCache;
+  }
+
+  async function getEsiRoute(originId, destinationId) {
+    const origin = Number(originId);
+    const destination = Number(destinationId);
+    if (origin === destination) return [origin];
+    const cacheKey = `${origin}:${destination}`;
+    if (state.routeCache.has(cacheKey)) return state.routeCache.get(cacheKey);
+
+    let route;
+    try {
+      route = await fetchJson(`${ESI_BASE}/route/${origin}/${destination}`, {
+        method: "POST",
+        body: JSON.stringify({ preference: "Shorter", security_penalty: 50 })
+      });
+      if (route && Array.isArray(route.route)) route = route.route;
+    } catch (err) {
+      if (!/404|405|compatibility/i.test(String(err && err.message))) throw err;
+      route = await fetchJson(
+        `${ESI_BASE}/latest/route/${origin}/${destination}/?datasource=tranquility&flag=shortest`,
+        { method: "GET" }
+      );
+    }
+
+    if (!Array.isArray(route) || !route.length) throw new Error("ESI вернул пустой маршрут.");
+    const normalized = route.map(Number);
+    state.routeCache.set(cacheKey, normalized);
+    return normalized;
+  }
+
+  async function fetchJson(url, options) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 25000);
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Compatibility-Date": ESI_COMPATIBILITY_DATE,
+          ...(options && options.headers ? options.headers : {})
+        }
+      });
+      if (!response.ok) {
+        let details = "";
+        try { details = JSON.stringify(await response.json()); } catch (_err) { details = response.statusText; }
+        throw new Error(`ESI ${response.status}: ${details}`);
+      }
+      return response.json();
+    } catch (err) {
+      if (err && err.name === "AbortError") throw new Error("ESI не ответил за 25 секунд.");
+      throw err;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  function renderRouteMap(routes) {
+    const validRoutes = routes.filter((route) => Array.isArray(route.nodes) && route.nodes.length);
+    if (!validRoutes.length) {
+      clearRouteWorkspace("В маршруте нет систем.", false);
+      return;
+    }
+
+    const compact = window.matchMedia("(max-width: 560px)").matches;
+    const maxNodeCount = Math.max(...validRoutes.map((route) => route.nodes.length));
+    const width = compact ? 360 : 1200;
+    const laneHeight = Math.max(135, Math.floor(680 / validRoutes.length));
+    const height = compact
+      ? Math.max(520, maxNodeCount * 92 + 80)
+      : Math.max(520, laneHeight * validRoutes.length + 80);
+    const left = 80;
+    const right = width - 80;
+    const edgeParts = [];
+    const nodeParts = [];
+
+    validRoutes.forEach((route, laneIndex) => {
+      const color = safeColor(route.color);
+      const y = 70 + laneIndex * laneHeight + laneHeight / 2;
+      const count = route.nodes.length;
+      const positions = route.nodes.map((node, index) => ({
+        ...node,
+        x: compact
+          ? width * (laneIndex + 1) / (validRoutes.length + 1)
+          : count === 1 ? width / 2 : left + (right - left) * index / (count - 1),
+        y: compact
+          ? 60 + (height - 120) * (count === 1 ? 0.5 : index / (count - 1))
+          : y + (index % 2 === 0 ? -12 : 12)
+      }));
+
+      for (let index = 1; index < positions.length; index += 1) {
+        const from = positions[index - 1];
+        const to = positions[index];
+        edgeParts.push(`<path class="route-edge" d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="${color}" />`);
+      }
+
+      positions.forEach((node, index) => {
+        const isTarget = route.targetIds && route.targetIds.has(Number(node.id));
+        const labelX = compact ? (node.x > width / 2 ? -13 : 13) : 0;
+        const labelY = compact ? -4 : -15;
+        const labelAnchor = compact ? (node.x > width / 2 ? "end" : "start") : "middle";
+        const metaX = compact ? labelX : 0;
+        const metaY = compact ? 13 : 25;
+        nodeParts.push(`
+          <g class="route-node ${isTarget ? "is-target" : ""}" transform="translate(${node.x} ${node.y})">
+            <circle r="${isTarget ? 9 : 6}" stroke="${color}"></circle>
+            <text x="${labelX}" y="${labelY}" text-anchor="${labelAnchor}">${escapeHtml(node.name)}</text>
+            <text class="route-node-meta" x="${metaX}" y="${metaY}" text-anchor="${labelAnchor}">${index === 0 ? "старт" : isTarget ? "цель" : `${index}`}</text>
+          </g>`);
+      });
+    });
+
+    els.routeMap.innerHTML = `
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Схема маршрутов флотов" preserveAspectRatio="xMidYMid meet">
+        ${edgeParts.join("")}
+        ${nodeParts.join("")}
+      </svg>`;
+  }
+
+  function clearRouteWorkspace(message, clearText = true) {
+    els.routeMap.innerHTML = `<div class="route-map-empty">${escapeHtml(message)}</div>`;
+    els.routeLegend.innerHTML = "";
+    els.routeList.innerHTML = "";
+    if (clearText) {
+      els.routeWorkspaceTitle.textContent = "Операционная карта";
+      els.routeWorkspaceHint.textContent = message;
+    }
+  }
+
+  function getAdminKey() {
+    return els.adminKey ? els.adminKey.value.trim() : "";
+  }
+
+  function getReadKey() {
+    if (ADMIN_MODE && getAdminKey()) return getAdminKey();
+    return els.viewKey ? els.viewKey.value.trim() : "";
+  }
+
+  function setLine(element, message, isError) {
+    if (!element) return;
+    element.textContent = message || "";
+    element.className = `status-line ${isError ? "error" : message ? "ok" : ""}`;
+  }
+
+  function friendlyError(err) {
+    const message = err && (err.message || err.details || err.hint)
+      ? `${err.message || ""} ${err.details || ""} ${err.hint || ""}`.trim()
+      : String(err || "Неизвестная ошибка");
+    if (/wrong fleet key|28000/i.test(message)) return "Неверный ключ флота.";
+    if (/fleet not found or inactive/i.test(message)) return "Флот не найден или выключен.";
+    if (/wrong admin key/i.test(message)) return "Неверный главный админ-ключ.";
+    if (/wrong view key/i.test(message)) return "Неверный ключ просмотра.";
+    if (/duplicate key.*fleet_profiles|fleet_profiles_board_id_name/i.test(message)) return "Флот с таким названием уже существует.";
+    if (/function .* does not exist|schema cache|list_fleets|create_fleet/i.test(message)) {
+      return "В Supabase нужно выполнить актуальный supabase/schema.sql.";
+    }
+    if (/Failed to fetch|NetworkError/i.test(message)) return "Не удалось связаться с ESI или Supabase.";
+    return message;
+  }
+
+  function normalizeResult(value) {
+    const result = String(value || "").trim();
+    return result === "Защищена" || result === "Уничтожена" ? result : "";
+  }
+
+  function normalizeName(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function boundedNumber(value, min, max, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(number)));
+  }
+
+  function formatUtc(value) {
+    const date = typeof value === "number" ? new Date(value) : new Date(String(value || ""));
+    if (Number.isNaN(date.getTime())) return "—";
+    return `${date.getUTCFullYear()}.${pad(date.getUTCMonth() + 1)}.${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  }
+
+  function formatSignedDuration(ms) {
+    const sign = ms < 0 ? "−" : "+";
+    const totalMinutes = Math.floor(Math.abs(ms) / 60000);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    return `${sign}${days ? `${days} д ` : ""}${pad(hours)}:${pad(minutes)}`;
+  }
+
+  function pad(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function safeColor(value) {
+    return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : "#27a7d8";
+  }
+
+  async function mapLimit(items, limit, worker) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    async function run() {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(items[index], index);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+    return results;
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  window.EVE_FLEET_ROUTER = {
+    activeRouteTargets,
+    formatSignedDuration,
+    normalizeName
+  };
+})();
