@@ -235,6 +235,16 @@ SDE: соседние системы показаны фоном, рассчит
 - [техническое задание](docs/FLEET_ROUTING_SPEC.md);
 - [инструкция по маршрутам](docs/FLEET_ROUTING_GUIDE.md).
 
+## Документация для разработки
+
+- [память проекта и текущий статус](docs/PROJECT_MEMORY.md);
+- [поэтапный план рефакторинга](docs/REFACTORING_ROADMAP.md);
+- [ТЗ текущего этапа: тестовый фундамент](docs/REFACTORING_STEP_01_TEST_FOUNDATION.md);
+- [ТЗ следующего этапа: безопасная запись данных](docs/REFACTORING_STEP_02_DATA_SAFETY.md).
+
+Файл `AGENTS.md` в корне содержит обязательный порядок чтения документации и
+правила обновления памяти для следующих сессий разработки.
+
 Каталог `data/solar-systems.json` собран из официального
 [EVE SDE](https://developers.eveonline.com/docs/services/static-data/) build
 `3646012`. Для его
