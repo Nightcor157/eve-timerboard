@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261024-2" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-3" />
 </head>
 <body>
   <header class="topbar">
@@ -15,7 +15,7 @@
     <nav class="nav">
       <a id="boardTab" class="nav-tab is-active" href="#board">Доска</a>
       <a id="routesTab" class="nav-tab" href="#routes">Маршруты</a>
-      <a id="adminTab" href="?admin=1#board">Админ</a>
+      <button id="viewModeBtn" class="view-mode-btn" type="button" aria-pressed="false">Вид: пользователь</button>
       <button id="refreshBtn" class="ghost-btn" type="button">Обновить</button>
     </nav>
   </header>
@@ -68,7 +68,7 @@
     <section id="adminPanel" class="panel admin" hidden>
       <div class="section-title">
         <h2>Добавить таймеры</h2>
-        <span class="hint">Панель открывается через <code>?admin=1</code></span>
+        <span class="hint">Админский вид включён</span>
       </div>
 
       <div class="admin-grid">
@@ -356,6 +356,32 @@ Hakatiz - 7-6
     </div>
   </main>
 
+  <dialog id="adminAccessDialog" class="access-dialog" aria-labelledby="adminAccessTitle">
+    <form id="adminAccessForm">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="adminAccessTitle">Включить админский вид</h2>
+          <p>Введите главный админ-ключ этой доски.</p>
+        </div>
+        <button id="closeAdminAccessBtn" class="dialog-close" type="button" aria-label="Закрыть">×</button>
+      </div>
+      <label>
+        Админ-ключ
+        <input id="adminViewKey" type="password" autocomplete="current-password" placeholder="главный админ-ключ" />
+      </label>
+      <label class="checkline dialog-remember">
+        <input id="rememberAdminViewKey" type="checkbox" />
+        <span class="checkbox-box" aria-hidden="true"></span>
+        <span>запомнить ключ в этом браузере</span>
+      </label>
+      <div id="adminAccessStatus" class="status-line" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <button id="cancelAdminAccessBtn" class="ghost-btn" type="button">Отмена</button>
+        <button id="confirmAdminAccessBtn" class="primary-btn" type="submit">Открыть админский вид</button>
+      </div>
+    </form>
+  </dialog>
+
   <template id="timerRowTemplate">
     <tr>
       <td data-field="system"></td>
@@ -375,7 +401,7 @@ Hakatiz - 7-6
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20261024-2"></script>
-  <script src="js/routes.js?v=20261024-2"></script>
+  <script src="js/app.js?v=20261024-3"></script>
+  <script src="js/routes.js?v=20261024-3"></script>
 </body>
 </html>

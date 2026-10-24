@@ -3,7 +3,7 @@
 
   const CONFIG = window.EVE_TIMERBOARD_CONFIG || {};
   const BOARD_ID = CONFIG.boardId || "main";
-  const ADMIN_MODE = new URLSearchParams(window.location.search).has("admin");
+  let adminViewEnabled = document.body.classList.contains("is-admin-view");
   const ESI_BASE = "https://esi.evetech.net";
   const ESI_COMPATIBILITY_DATE = "2025-09-30";
   const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
@@ -29,6 +29,7 @@
     routeRows: [],
     selectedFleetId: "",
     selectedFleetKey: "",
+    boardAccessFleetId: "",
     routeCache: new Map(),
     nameCache: new Map(),
     idNameCache: new Map(),
@@ -111,6 +112,14 @@
     });
     els.rememberFleetKey.addEventListener("change", rememberCurrentFleetKey);
     els.reloadRouteBtn.addEventListener("click", reloadCurrentRoute);
+    window.addEventListener("eve-timerboard:board-result-updated", () => {
+      if (state.mapMode === "fleet") reloadCurrentRoute();
+    });
+    window.addEventListener("eve-timerboard:admin-view-changed", (event) => {
+      adminViewEnabled = Boolean(event.detail && event.detail.enabled);
+      setMapMode(state.mapMode);
+      if (!els.routesView.hidden) loadRouteData();
+    });
     els.routeZoomOutBtn.addEventListener("click", () => changeRouteZoom(-0.25));
     els.routeZoomResetBtn.addEventListener("click", resetRouteZoom);
     els.routeZoomInBtn.addEventListener("click", () => changeRouteZoom(0.25));
@@ -150,11 +159,11 @@
     els.generalMapModeBtn.classList.toggle("is-selected", general);
     els.fleetMapModeBtn.classList.toggle("is-selected", !general);
     els.generalRoutePanel.hidden = !general;
-    els.fleetAccessPanel.hidden = general || ADMIN_MODE;
-    els.fleetAdminPanel.hidden = general || !ADMIN_MODE;
+    els.fleetAccessPanel.hidden = general || adminViewEnabled;
+    els.fleetAdminPanel.hidden = general || !adminViewEnabled;
     clearRouteWorkspace(general
       ? "Укажите стартовую систему выше и нажмите «Рассчитать»."
-      : ADMIN_MODE
+      : adminViewEnabled
         ? "Создай флоты или загрузи сохранённые маршруты."
         : "Выбери флот и введи его ключ.");
     if (!general) loadRouteData();
@@ -169,7 +178,7 @@
     if (state.loadingFleets) return;
     state.loadingFleets = true;
     try {
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         const adminKey = getAdminKey();
         if (!adminKey) {
           setLine(els.fleetAdminStatus, "Введи главный админ-ключ на вкладке доски.", true);
@@ -686,6 +695,9 @@
 
   function restoreSelectedFleetKey() {
     const fleetId = els.fleetLoginSelect.value;
+    if (state.boardAccessFleetId && state.boardAccessFleetId !== fleetId) {
+      publishFleetBoardAccess("", "", []);
+    }
     state.selectedFleetId = fleetId;
     if (!fleetId) {
       els.fleetLoginKey.value = "";
@@ -726,12 +738,14 @@
       state.selectedFleetId = fleetId;
       state.selectedFleetKey = fleetKey;
       state.routeRows = data || [];
+      publishFleetBoardAccess(fleetId, fleetKey, state.routeRows);
       rememberCurrentFleetKey();
       const fleet = state.fleets.find((item) => item.fleet_id === fleetId);
       renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
-      setLine(els.fleetLoginStatus, "Маршрут открыт.", false);
+      setLine(els.fleetLoginStatus, "Маршрут открыт. На доске доступны итоги назначенных целей.", false);
     } catch (err) {
       state.selectedFleetKey = "";
+      publishFleetBoardAccess("", "", []);
       setLine(els.fleetLoginStatus, friendlyError(err), true);
     } finally {
       els.openFleetRouteBtn.disabled = false;
@@ -810,6 +824,7 @@
     const sorted = rows.slice().sort((a, b) => String(a.fleet_name).localeCompare(String(b.fleet_name), "ru") || a.route_order - b.route_order);
     els.routeList.innerHTML = sorted.map((row) => {
       const marginMs = new Date(row.end_at).getTime() - new Date(row.eta_at).getTime();
+      const result = normalizeResult(row.result);
       return `
         <div class="route-list-row ${marginMs < 0 ? "is-late" : ""}" data-timer-id="${escapeHtml(row.timer_id)}" data-fleet-id="${escapeHtml(row.fleet_id)}">
           <div class="route-list-order">${Number(row.route_order)}</div>
@@ -818,50 +833,24 @@
           <div>${Number(row.jump_count)} прыжков</div>
           <div><div>${escapeHtml(formatUtc(row.eta_at))}</div><div class="route-list-meta">таймер ${escapeHtml(formatUtc(row.end_at))}</div></div>
           <div class="route-margin ${marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(marginMs))}</div>
-          <div class="route-result-actions">
-            <button class="result-action-btn is-defended-result" data-result="Защищена" type="button">Защищена</button>
-            <button class="result-action-btn is-destroyed-result" data-result="Уничтожена" type="button">Уничтожена</button>
-            <button class="result-reset-btn" data-result="" type="button">Сбросить</button>
+          <div class="route-result-summary">
+            ${result
+              ? `<span class="result-badge ${resultClass(result)}">${escapeHtml(result)}</span>`
+              : '<span class="route-list-meta">Итог ставится на доске</span>'}
           </div>
         </div>`;
     }).join("");
-
-    els.routeList.querySelectorAll("button[data-result]").forEach((button) => {
-      button.addEventListener("click", setRouteTimerResult);
-    });
   }
 
-  async function setRouteTimerResult(event) {
-    const button = event.currentTarget;
-    const row = button.closest(".route-list-row");
-    const timerId = row.dataset.timerId;
-    const fleetId = row.dataset.fleetId;
-    const result = button.dataset.result;
-    const accessKey = ADMIN_MODE ? getAdminKey() : state.selectedFleetKey;
-    if (!accessKey) {
-      setLine(els.fleetLoginStatus, "Сессия флота не открыта.", true);
-      return;
-    }
-
-    row.querySelectorAll("button").forEach((item) => { item.disabled = true; });
-    try {
-      const { error } = await db.rpc("set_fleet_timer_result", {
-        p_board_id: BOARD_ID,
-        p_access_key: accessKey,
-        p_fleet_id: ADMIN_MODE ? null : fleetId,
-        p_timer_id: timerId,
-        p_result: result
-      });
-      if (error) throw error;
-      const statusElement = ADMIN_MODE ? els.fleetAdminStatus : els.fleetLoginStatus;
-      setLine(statusElement, result ? `Результат установлен: ${result}.` : "Результат сброшен.", false);
-      if (els.refreshBtn) els.refreshBtn.click();
-      await reloadCurrentRoute();
-    } catch (err) {
-      const statusElement = ADMIN_MODE ? els.fleetAdminStatus : els.fleetLoginStatus;
-      setLine(statusElement, `Ошибка результата: ${friendlyError(err)}`, true);
-      row.querySelectorAll("button").forEach((item) => { item.disabled = false; });
-    }
+  function publishFleetBoardAccess(fleetId, fleetKey, rows) {
+    state.boardAccessFleetId = fleetId || "";
+    window.dispatchEvent(new CustomEvent("eve-timerboard:fleet-board-access", {
+      detail: fleetId && fleetKey ? {
+        fleetId,
+        fleetKey,
+        timerIds: (rows || []).map((row) => String(row.timer_id))
+      } : null
+    }));
   }
 
   async function reloadCurrentRoute() {
@@ -870,7 +859,7 @@
         if (els.generalOriginSystem.value.trim()) await buildGeneralRoute();
         return;
       }
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         await loadAdminFleets();
         await loadAllFleetRoutes();
       } else if (state.selectedFleetId && state.selectedFleetKey) {
@@ -881,7 +870,7 @@
         await loadPublicFleets();
       }
     } catch (err) {
-      const statusElement = ADMIN_MODE ? els.fleetAdminStatus : els.fleetLoginStatus;
+      const statusElement = adminViewEnabled ? els.fleetAdminStatus : els.fleetLoginStatus;
       setLine(statusElement, friendlyError(err), true);
     }
   }
@@ -1436,7 +1425,7 @@
   }
 
   function getReadKey() {
-    if (ADMIN_MODE && getAdminKey()) return getAdminKey();
+    if (adminViewEnabled && getAdminKey()) return getAdminKey();
     return els.viewKey ? els.viewKey.value.trim() : "";
   }
 
@@ -1465,6 +1454,13 @@
   function normalizeResult(value) {
     const result = String(value || "").trim();
     return result === "Защищена" || result === "Уничтожена" ? result : "";
+  }
+
+  function resultClass(value) {
+    const result = normalizeResult(value);
+    if (result === "Защищена") return "is-defended-result";
+    if (result === "Уничтожена") return "is-destroyed-result";
+    return "";
   }
 
   function normalizeName(value) {

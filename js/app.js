@@ -4,7 +4,7 @@
   const CONFIG = window.EVE_TIMERBOARD_CONFIG || {};
   const BOARD_ID = CONFIG.boardId || "main";
   const POLL_MS = Number(CONFIG.pollEveryMs || 15000);
-  const ADMIN_MODE = new URLSearchParams(window.location.search).has("admin");
+  const ADMIN_REQUESTED = new URLSearchParams(window.location.search).has("admin");
   const LOCAL_KEY = `eve_timerboard_${BOARD_ID}`;
   const ADMIN_KEY_STORAGE = `eve_timerboard_admin_key_${BOARD_ID}`;
   const VIEW_KEY_STORAGE = `eve_timerboard_view_key_${BOARD_ID}`;
@@ -57,6 +57,9 @@
 
   let timers = [];
   let lastRenderedSignature = "";
+  let fleetBoardAccess = null;
+  let adminViewEnabled = false;
+  let adminKeyValidated = false;
 
   const els = {
     configWarning: document.getElementById("configWarning"),
@@ -96,7 +99,15 @@
     statActive: document.getElementById("statActive"),
     statSoon: document.getElementById("statSoon"),
     statEnded: document.getElementById("statEnded"),
-    adminTab: document.getElementById("adminTab")
+    viewModeBtn: document.getElementById("viewModeBtn"),
+    adminAccessDialog: document.getElementById("adminAccessDialog"),
+    adminAccessForm: document.getElementById("adminAccessForm"),
+    adminViewKey: document.getElementById("adminViewKey"),
+    rememberAdminViewKey: document.getElementById("rememberAdminViewKey"),
+    adminAccessStatus: document.getElementById("adminAccessStatus"),
+    confirmAdminAccessBtn: document.getElementById("confirmAdminAccessBtn"),
+    closeAdminAccessBtn: document.getElementById("closeAdminAccessBtn"),
+    cancelAdminAccessBtn: document.getElementById("cancelAdminAccessBtn")
   };
 
   init();
@@ -106,18 +117,12 @@
       els.configWarning.hidden = false;
     }
 
-    if (ADMIN_MODE) {
-      els.adminPanel.hidden = false;
-      document.querySelectorAll(".admin-only").forEach((el) => { el.hidden = false; });
-      els.adminTab.textContent = "Обычный вид";
-      els.adminTab.href = `${window.location.pathname}#board`;
-      els.adminTab.title = "Выйти из режима администратора";
-    }
-
     const savedKey = localStorage.getItem(ADMIN_KEY_STORAGE);
     if (savedKey) {
       els.adminKey.value = savedKey;
       els.rememberKey.checked = true;
+      els.adminViewKey.value = savedKey;
+      els.rememberAdminViewKey.checked = true;
     }
 
     const savedViewKey = localStorage.getItem(VIEW_KEY_STORAGE);
@@ -142,6 +147,14 @@
     els.showEnded.addEventListener("change", renderTimers);
     els.endedWindow.addEventListener("change", renderTimers);
     els.exportCsvBtn.addEventListener("click", exportCsv);
+    els.viewModeBtn.addEventListener("click", toggleAdminView);
+    els.adminAccessForm.addEventListener("submit", submitAdminAccess);
+    els.closeAdminAccessBtn.addEventListener("click", closeAdminAccessDialog);
+    els.cancelAdminAccessBtn.addEventListener("click", closeAdminAccessDialog);
+    els.adminAccessDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeAdminAccessDialog();
+    });
     els.rememberKey.addEventListener("change", () => {
       if (!els.rememberKey.checked) localStorage.removeItem(ADMIN_KEY_STORAGE);
       if (els.rememberKey.checked && els.adminKey.value.trim()) {
@@ -149,6 +162,8 @@
       }
     });
     els.adminKey.addEventListener("change", () => {
+      adminKeyValidated = false;
+      els.adminViewKey.value = els.adminKey.value.trim();
       if (els.rememberKey.checked) {
         localStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
       }
@@ -163,10 +178,130 @@
     els.viewKey.addEventListener("keydown", (event) => {
       if (event.key === "Enter") unlockView();
     });
+    window.addEventListener("eve-timerboard:fleet-board-access", applyFleetBoardAccess);
 
+    applyAdminView(false, false);
     loadTimers();
+    if (ADMIN_REQUESTED) requestAdminView();
     window.setInterval(tick, 1000);
     window.setInterval(loadTimers, POLL_MS);
+  }
+
+  function toggleAdminView() {
+    if (adminViewEnabled) {
+      applyAdminView(false);
+      loadTimers();
+      return;
+    }
+    requestAdminView();
+  }
+
+  async function requestAdminView() {
+    const knownKey = els.adminKey.value.trim() || els.adminViewKey.value.trim();
+    if (knownKey && adminKeyValidated) {
+      applyAdminView(true);
+      await loadTimers();
+      return;
+    }
+    if (knownKey && await validateAdminKey(knownKey, false)) {
+      finishAdminAccess(knownKey);
+      return;
+    }
+    openAdminAccessDialog(knownKey ? "Сохранённый админ-ключ не подошёл. Введите актуальный ключ." : "");
+  }
+
+  async function submitAdminAccess(event) {
+    event.preventDefault();
+    const adminKey = els.adminViewKey.value.trim();
+    if (!adminKey) {
+      setAdminAccessStatus("Введите админ-ключ.", true);
+      return;
+    }
+    if (!await validateAdminKey(adminKey, true)) return;
+    finishAdminAccess(adminKey);
+  }
+
+  async function validateAdminKey(adminKey, showError) {
+    if (!db) {
+      if (showError) setAdminAccessStatus("Для проверки ключа сначала подключите Supabase.", true);
+      return false;
+    }
+    els.confirmAdminAccessBtn.disabled = true;
+    if (showError) setAdminAccessStatus("Проверяю ключ...", false);
+    try {
+      const { error } = await db.rpc("list_fleets_admin", {
+        p_board_id: BOARD_ID,
+        p_admin_key: adminKey
+      });
+      if (error) throw error;
+      adminKeyValidated = true;
+      return true;
+    } catch (err) {
+      adminKeyValidated = false;
+      if (showError) setAdminAccessStatus(friendlyDbError(err), true);
+      return false;
+    } finally {
+      els.confirmAdminAccessBtn.disabled = false;
+    }
+  }
+
+  function finishAdminAccess(adminKey) {
+    els.adminKey.value = adminKey;
+    els.adminViewKey.value = adminKey;
+    els.rememberKey.checked = els.rememberAdminViewKey.checked;
+    if (els.rememberAdminViewKey.checked) {
+      localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+    } else {
+      localStorage.removeItem(ADMIN_KEY_STORAGE);
+    }
+    closeAdminAccessDialog();
+    applyAdminView(true);
+    loadTimers();
+  }
+
+  function applyAdminView(enabled, updateHistory = true) {
+    adminViewEnabled = Boolean(enabled);
+    document.body.classList.toggle("is-admin-view", adminViewEnabled);
+    els.adminPanel.hidden = !adminViewEnabled;
+    document.querySelectorAll("th.admin-only").forEach((element) => {
+      element.hidden = !adminViewEnabled;
+    });
+    els.viewModeBtn.textContent = adminViewEnabled ? "Вид: админ" : "Вид: пользователь";
+    els.viewModeBtn.classList.toggle("is-admin", adminViewEnabled);
+    els.viewModeBtn.setAttribute("aria-pressed", String(adminViewEnabled));
+    els.viewModeBtn.title = adminViewEnabled
+      ? "Переключиться на пользовательский вид"
+      : "Переключиться на админский вид";
+    lastRenderedSignature = "";
+    renderTimers();
+
+    if (updateHistory) {
+      const url = new URL(window.location.href);
+      if (adminViewEnabled) url.searchParams.set("admin", "1");
+      else url.searchParams.delete("admin");
+      history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+
+    window.dispatchEvent(new CustomEvent("eve-timerboard:admin-view-changed", {
+      detail: { enabled: adminViewEnabled }
+    }));
+  }
+
+  function openAdminAccessDialog(message) {
+    els.adminViewKey.value = els.adminKey.value.trim() || els.adminViewKey.value.trim();
+    setAdminAccessStatus(message || "", Boolean(message));
+    if (!els.adminAccessDialog.open) els.adminAccessDialog.showModal();
+    window.setTimeout(() => els.adminViewKey.focus(), 0);
+  }
+
+  function closeAdminAccessDialog() {
+    if (els.adminAccessDialog.open) els.adminAccessDialog.close();
+    setAdminAccessStatus("", false);
+  }
+
+  function setAdminAccessStatus(message, isError) {
+    els.adminAccessStatus.textContent = message || "";
+    els.adminAccessStatus.className = `status-line ${isError ? "error" : message ? "ok" : ""}`;
   }
 
   async function loadTimers() {
@@ -206,7 +341,7 @@
 
   function getReadKey() {
     const adminKey = els.adminKey.value.trim();
-    if (ADMIN_MODE && adminKey) return adminKey;
+    if (adminViewEnabled && adminKey) return adminKey;
     return els.viewKey.value.trim();
   }
 
@@ -223,7 +358,7 @@
   }
 
   function showViewGate(message, isError) {
-    if (!db || ADMIN_MODE && els.adminKey.value.trim()) return;
+    if (!db || adminViewEnabled && els.adminKey.value.trim()) return;
     els.viewKeyPanel.hidden = false;
     els.boardPanel.hidden = true;
     els.viewStatus.textContent = message || "";
@@ -364,7 +499,7 @@
   }
 
   async function deleteTimer(id) {
-    if (!ADMIN_MODE) return;
+    if (!adminViewEnabled) return;
     const timer = timers.find((t) => t.id === id);
     const label = timer ? `${timer.system || "?"} / ${formatUtc(timer.end_at)}` : id;
     if (!window.confirm(`Удалить таймер ${label}?`)) return;
@@ -621,7 +756,10 @@
       sortMode,
       showEnded,
       endedWindow: els.endedWindow.value,
-      adminMode: ADMIN_MODE
+      adminMode: adminViewEnabled,
+      fleetBoardAccess: fleetBoardAccess
+        ? [fleetBoardAccess.fleetId, ...fleetBoardAccess.timerIds].join(":")
+        : ""
     });
     if (signature === lastRenderedSignature) return;
     lastRenderedSignature = signature;
@@ -637,18 +775,18 @@
       row.className = timer.status.className;
       row.dataset.timerId = timer.id;
 
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         setEditableCell(row, "system", timer.system, (value) => saveTimerAdminFields(timer, { system: value }));
       } else {
         setCell(row, "system", timer.system || "—");
       }
       makeSystemCellCopyable(row);
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         setSelectCell(row, "object_name", STRUCTURE_TYPE_OPTIONS, normalizeStructureType(timer.object_name), (value) => saveTimerAdminFields(timer, { object_name: value }));
       } else {
         setCell(row, "object_name", normalizeStructureType(timer.object_name) || "—");
       }
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         setEditableCell(row, "structure", timer.structure, (value) => saveTimerAdminFields(timer, { structure: value }));
         setEditableCell(row, "title", timer.title, (value) => saveTimerAdminFields(timer, { title: value }));
         setEditableCell(row, "owner", timer.owner, (value) => saveTimerAdminFields(timer, { owner: value }));
@@ -659,26 +797,28 @@
         setCell(row, "owner", timer.owner || "—");
         setCell(row, "mode", timer.mode || "—");
       }
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         setSelectCell(row, "timer_kind", TIMER_KIND_OPTIONS, normalizeTimerKind(timer.distance), (value) => saveTimerAdminFields(timer, { distance: value }));
       } else {
         setTimerKindCell(row, "timer_kind", normalizeTimerKind(timer.distance));
       }
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         setEditableCell(row, "end_at", formatUtc(timer.end_at), (value) => saveTimerAdminFields(timer, { end_at: value }), "2026.05.22 13:08:10");
       } else {
         setCell(row, "end_at", formatUtc(timer.end_at));
       }
       setCell(row, "remaining", timer.remainingText);
       setCell(row, "status", timer.status.label);
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         setResultButtons(row, "result", normalizeStructureResult(timer.note), (value) => saveTimerAdminFields(timer, { note: value }));
+      } else if (canFleetEditResult(timer.id)) {
+        setResultButtons(row, "result", normalizeStructureResult(timer.note), (value) => saveFleetBoardResult(timer, value));
       } else {
         setStructureResultCell(row, "result", normalizeStructureResult(timer.note));
       }
 
       const actionsCell = row.querySelector('[data-field="actions"]');
-      if (ADMIN_MODE) {
+      if (adminViewEnabled) {
         actionsCell.hidden = false;
         const btn = document.createElement("button");
         btn.type = "button";
@@ -689,6 +829,51 @@
       }
 
       els.timersBody.appendChild(row);
+    }
+  }
+
+  function applyFleetBoardAccess(event) {
+    const detail = event && event.detail;
+    fleetBoardAccess = detail && detail.fleetId && detail.fleetKey
+      ? {
+          fleetId: String(detail.fleetId),
+          fleetKey: String(detail.fleetKey),
+          timerIds: new Set((detail.timerIds || []).map(String))
+        }
+      : null;
+    lastRenderedSignature = "";
+    renderTimers();
+  }
+
+  function canFleetEditResult(timerId) {
+    return !adminViewEnabled &&
+      fleetBoardAccess &&
+      fleetBoardAccess.timerIds.has(String(timerId));
+  }
+
+  async function saveFleetBoardResult(timer, value) {
+    if (!db || !canFleetEditResult(timer.id)) return;
+    try {
+      const { error } = await db.rpc("set_fleet_timer_result", {
+        p_board_id: BOARD_ID,
+        p_access_key: fleetBoardAccess.fleetKey,
+        p_fleet_id: fleetBoardAccess.fleetId,
+        p_timer_id: timer.id,
+        p_result: normalizeStructureResult(value)
+      });
+      if (error) throw error;
+      timers = timers.map((item) => item.id === timer.id ? {
+        ...item,
+        note: normalizeStructureResult(value),
+        updated_at: new Date().toISOString()
+      } : item);
+      lastRenderedSignature = "";
+      renderTimers();
+      window.dispatchEvent(new CustomEvent("eve-timerboard:board-result-updated"));
+    } catch (err) {
+      setStatus(`Ошибка результата: ${friendlyDbError(err)}`, true);
+      lastRenderedSignature = "";
+      renderTimers();
     }
   }
 
@@ -889,7 +1074,7 @@
   }
 
   async function saveTimerAdminFields(timer, changes) {
-    if (!ADMIN_MODE) return;
+    if (!adminViewEnabled) return;
     const nextEndAt = Object.prototype.hasOwnProperty.call(changes, "end_at") ? parseUtcInput(changes.end_at) : timer.end_at;
     if (!nextEndAt) {
       setStatus("Дата должна быть в формате 2026.05.22 13:08:10.", true);

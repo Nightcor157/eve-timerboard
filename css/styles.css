@@ -99,6 +99,94 @@ textarea::placeholder {
   background: #102b3c;
 }
 
+.view-mode-btn {
+  background: transparent;
+  border-color: var(--border);
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+
+.view-mode-btn.is-admin {
+  color: #b8d5de;
+  background: #133347;
+  border-color: #35718a;
+}
+
+.access-dialog {
+  width: min(29rem, calc(100vw - 2rem));
+  padding: 0;
+  color: var(--text);
+  background: #0e2231;
+  border: 1px solid #31566a;
+  border-radius: 0.8rem;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62);
+}
+
+.access-dialog::backdrop {
+  background: rgba(2, 10, 16, 0.76);
+  backdrop-filter: blur(3px);
+}
+
+.access-dialog form {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+}
+
+.access-dialog input[type="password"] {
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dialog-heading h2,
+.dialog-heading p {
+  margin: 0;
+}
+
+.dialog-heading h2 {
+  color: #b8cbd1;
+  font-size: 1.15rem;
+}
+
+.dialog-heading p {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.dialog-close {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  color: #94adb7;
+  background: transparent;
+  border-color: transparent;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.dialog-close:hover {
+  border-color: var(--border);
+  background: var(--row);
+}
+
+.dialog-remember {
+  justify-self: start;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
 .layout {
   width: min(2200px, calc(100% - 0.25rem));
   margin: 0.5rem auto 3rem;
@@ -1061,15 +1149,10 @@ input.system-autocomplete.is-invalid {
 .route-margin.is-positive { color: #91b19b; }
 .route-margin.is-negative { color: #c09494; }
 
-.route-result-actions {
+.route-result-summary {
   display: flex;
-  gap: 0.35rem;
+  align-items: center;
   justify-content: flex-end;
-}
-
-.route-result-actions button {
-  padding: 0.4rem 0.5rem;
-  white-space: nowrap;
 }
 
 .route-recommendation {
@@ -1123,7 +1206,7 @@ input.system-autocomplete.is-invalid {
   .route-list-row > :nth-child(n + 5) {
     grid-column: span 2;
   }
-  .route-result-actions {
+  .route-result-summary {
     justify-content: flex-start;
   }
 }
@@ -1146,8 +1229,7 @@ input.system-autocomplete.is-invalid {
     grid-column: auto;
   }
   .generated-key,
-  .fleet-profile-actions,
-  .route-result-actions {
+  .fleet-profile-actions {
     align-items: stretch;
     flex-direction: column;
   }
