@@ -560,8 +560,8 @@
       setLine(
         els.fleetAdminStatus,
         changedProfiles
-          ? `Профилей обновлено: ${changedProfiles}. Загружаю таймеры и рассчитываю переходы ESI…`
-          : "Загружаю таймеры и рассчитываю переходы ESI…",
+          ? `Профилей обновлено: ${changedProfiles}. Загружаю таймеры и рассчитываю переходы…`
+          : "Загружаю таймеры и рассчитываю переходы…",
         false
       );
       const timers = await loadTimersForRoutes(getAdminKey());
@@ -577,7 +577,7 @@
 
       const fleetStates = fleets.map((fleet) => {
         const system = resolved.get(normalizeName(fleet.current_system));
-        if (!system) throw new Error(`Система флота не найдена в ESI: ${fleet.current_system}`);
+        if (!system) throw new Error(`Система флота не найдена в каталоге EVE: ${fleet.current_system}`);
         return {
           fleet,
           currentId: system.id,
@@ -596,7 +596,7 @@
           false
         );
         const targetSystem = resolved.get(normalizeName(timer.system));
-        if (!targetSystem) throw new Error(`Система таймера не найдена в ESI: ${timer.system}`);
+        if (!targetSystem) throw new Error(`Система таймера не найдена в каталоге EVE: ${timer.system}`);
 
         const options = await Promise.all(fleetStates.map((fleetState) =>
           calculateFleetTargetOption(fleetState, targetSystem, timer)
@@ -650,7 +650,7 @@
   }
 
   async function calculateFleetTargetOption(fleetState, targetSystem, timer) {
-    const routeIds = await getEsiRoute(fleetState.currentId, targetSystem.id);
+    const routeIds = await getRoute(fleetState.currentId, targetSystem.id);
     const jumps = Math.max(0, routeIds.length - 1);
     const arrivalAt = fleetState.availableAt + jumps * Number(fleetState.fleet.seconds_per_jump) * 1000;
     const deadline = new Date(timer.end_at).getTime();
@@ -695,7 +695,7 @@
 
       const resolved = await resolveSystemNames([origin, ...targets.map((timer) => timer.system)]);
       const originSystem = resolved.get(normalizeName(origin));
-      if (!originSystem) throw new Error(`Система не найдена в ESI: ${origin}`);
+      if (!originSystem) throw new Error(`Система не найдена в каталоге EVE: ${origin}`);
 
       const fleetState = {
         fleet: {
@@ -716,7 +716,7 @@
           false
         );
         const targetSystem = resolved.get(normalizeName(timer.system));
-        if (!targetSystem) throw new Error(`Система таймера не найдена в ESI: ${timer.system}`);
+        if (!targetSystem) throw new Error(`Система таймера не найдена в каталоге EVE: ${timer.system}`);
         const option = await calculateFleetTargetOption(fleetState, targetSystem, timer);
         fleetState.order += 1;
         candidates.push({
@@ -1284,12 +1284,19 @@
     return state.idNameCache;
   }
 
-  async function getEsiRoute(originId, destinationId) {
+  async function getRoute(originId, destinationId) {
     const origin = Number(originId);
     const destination = Number(destinationId);
     if (origin === destination) return [origin];
     const cacheKey = `${origin}:${destination}`;
     if (state.routeCache.has(cacheKey)) return state.routeCache.get(cacheKey);
+
+    await loadSystemCatalog().catch(() => {});
+    const catalogRoute = findCatalogRoute(origin, destination);
+    if (catalogRoute) {
+      state.routeCache.set(cacheKey, catalogRoute);
+      return catalogRoute;
+    }
 
     let route;
     try {
@@ -1310,6 +1317,34 @@
     const normalized = route.map(Number);
     state.routeCache.set(cacheKey, normalized);
     return normalized;
+  }
+
+  function findCatalogRoute(origin, destination) {
+    if (!state.systemById.has(origin) || !state.systemById.has(destination)) return null;
+    const queue = [origin];
+    const previous = new Map([[origin, null]]);
+
+    for (let index = 0; index < queue.length; index += 1) {
+      const current = queue[index];
+      const system = state.systemById.get(current);
+      for (const neighbor of system.neighbors) {
+        const id = Number(neighbor);
+        if (previous.has(id)) continue;
+        previous.set(id, current);
+        if (id === destination) {
+          const route = [destination];
+          let cursor = current;
+          while (cursor !== null) {
+            route.push(cursor);
+            cursor = previous.get(cursor) ?? null;
+          }
+          route.reverse();
+          return route;
+        }
+        queue.push(id);
+      }
+    }
+    return null;
   }
 
   async function fetchJson(url, options) {
