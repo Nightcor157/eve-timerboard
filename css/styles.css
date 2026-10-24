@@ -821,8 +821,17 @@ input.table-input:focus {
 }
 
 .route-node.is-target circle {
-  fill: #193342;
+  fill: var(--route-color, #27a7d8);
   stroke-width: 3;
+}
+
+.field-help {
+  display: block;
+  margin-top: 0.35rem;
+  color: #7895a2;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.35;
 }
 
 .route-node text {

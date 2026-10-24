@@ -134,7 +134,7 @@
     els.fleetAccessPanel.hidden = general || ADMIN_MODE;
     els.fleetAdminPanel.hidden = general || !ADMIN_MODE;
     clearRouteWorkspace(general
-      ? "Укажи исходную систему и рассчитай следующую цель."
+      ? "Укажите стартовую систему выше и нажмите «Рассчитать»."
       : ADMIN_MODE
         ? "Создай флоты или загрузи сохранённые маршруты."
         : "Выбери флот и введи его ключ.");
@@ -505,7 +505,7 @@
     const origin = els.generalOriginSystem.value.trim();
     const secondsPerJump = boundedNumber(els.generalSecondsPerJump.value, 5, 3600, 60);
     if (!origin) {
-      setLine(els.generalRouteStatus, "Укажи текущую систему.", true);
+      setLine(els.generalRouteStatus, "Укажите стартовую систему, в которой вы сейчас находитесь.", true);
       return;
     }
     const readKey = getReadKey();
@@ -957,10 +957,10 @@
         const metaX = compact ? labelX : 0;
         const metaY = compact ? 13 : 25;
         nodeParts.push(`
-          <g class="route-node ${isTarget ? "is-target" : ""}" transform="translate(${node.x} ${node.y})">
+          <g class="route-node ${isTarget ? "is-target" : ""}" style="--route-color:${color}" transform="translate(${node.x} ${node.y})">
             <circle r="${isTarget ? 9 : 6}" stroke="${color}"></circle>
             <text x="${labelX}" y="${labelY}" text-anchor="${labelAnchor}">${escapeHtml(node.name)}</text>
-            <text class="route-node-meta" x="${metaX}" y="${metaY}" text-anchor="${labelAnchor}">${index === 0 ? "старт" : isTarget ? "цель" : `${index}`}</text>
+            <text class="route-node-meta" x="${metaX}" y="${metaY}" text-anchor="${labelAnchor}">${index === 0 ? "старт" : isTarget ? "таймер" : `${index}`}</text>
           </g>`);
       });
     });
