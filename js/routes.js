@@ -34,6 +34,10 @@
     fleets: [],
     adminFleets: [],
     routeRows: [],
+    routeTableSort: {
+      general: { key: "order", direction: "asc" },
+      fleet: { key: "default", direction: "asc" }
+    },
     hiddenFleetIds: new Set(),
     selectedFleetId: "",
     selectedFleetKey: "",
@@ -848,6 +852,7 @@
   }
 
   function renderGeneralCandidates(candidates, recommended, secondsPerJump, serviceMinutes) {
+    const displayCandidates = sortGeneralRouteRows(candidates);
     els.routeLegend.innerHTML = `
       <span class="route-legend-item">
         <span class="route-legend-swatch" style="--fleet-color:#27a7d8"></span>
@@ -864,11 +869,11 @@
       </div>
       <div class="route-table-wrap">
         <table class="route-table route-table-general">
-          ${renderRouteTableHead(false)}
+          ${renderRouteTableHead(false, state.routeTableSort.general)}
           <tbody>
-            ${candidates.map((candidate, index) => `
+            ${displayCandidates.map(({ candidate, routeOrder }) => `
               <tr class="route-list-row ${candidate.marginMs < 0 ? "is-late" : ""}">
-                <td class="route-list-order">${index + 1}</td>
+                <td class="route-list-order">${routeOrder}</td>
                 ${renderCopyableSystemCell(candidate.timer.system)}
                 <td>${routeValue(candidate.timer.object_name)}</td>
                 <td>${routeValue(candidate.timer.structure)}</td>
@@ -1062,12 +1067,75 @@
     renderFleetRoutes(state.routeRows, els.routeWorkspaceTitle.textContent || "Все флоты");
   }
 
+  function sortGeneralRouteRows(candidates) {
+    const rows = candidates.map((candidate, index) => ({ candidate, routeOrder: index + 1 }));
+    return sortRouteRows(rows, "general", state.routeTableSort.general);
+  }
+
+  function sortFleetRouteRows(rows) {
+    return sortRouteRows(rows.slice(), "fleet", state.routeTableSort.fleet);
+  }
+
+  function sortRouteRows(rows, mode, sort) {
+    if (mode === "fleet" && sort.key === "default") {
+      return rows.sort((a, b) => compareRouteText(a.fleet_name, b.fleet_name) || Number(a.route_order) - Number(b.route_order));
+    }
+    const direction = sort.direction === "desc" ? -1 : 1;
+    return rows.sort((a, b) => {
+      const result = compareRouteSortValues(getRouteSortValue(a, mode, sort.key), getRouteSortValue(b, mode, sort.key));
+      const fallback = mode === "general"
+        ? a.routeOrder - b.routeOrder
+        : compareRouteText(a.fleet_name, b.fleet_name) || Number(a.route_order) - Number(b.route_order);
+      return (result || fallback) * direction;
+    });
+  }
+
+  function getRouteSortValue(row, mode, key) {
+    const candidate = mode === "general" ? row.candidate : null;
+    const timer = candidate && candidate.timer;
+    const endAt = mode === "general" ? timer.end_at : row.end_at;
+    const etaAt = mode === "general" ? candidate.eta : row.eta_at;
+    const marginMs = mode === "general"
+      ? candidate.marginMs
+      : new Date(row.end_at).getTime() - new Date(row.eta_at).getTime();
+
+    if (key === "order") return mode === "general" ? row.routeOrder : Number(row.route_order);
+    if (key === "fleet") return mode === "general" ? "" : row.fleet_name;
+    if (key === "system") return mode === "general" ? timer.system : row.timer_system;
+    if (key === "object_name") return mode === "general" ? timer.object_name : row.object_name;
+    if (key === "structure") return mode === "general" ? timer.structure : row.structure;
+    if (key === "corporation") return mode === "general" ? timer.title : row.corporation;
+    if (key === "alliance") return mode === "general" ? timer.owner : row.alliance;
+    if (key === "mode") return mode === "general" ? timer.mode : row.mode;
+    if (key === "timer_kind") return mode === "general" ? timer.distance : row.timer_kind;
+    if (key === "jumps") return Number(mode === "general" ? candidate.jumps : row.jump_count);
+    if (key === "eta") return new Date(etaAt).getTime();
+    if (key === "end_at" || key === "remaining") return new Date(endAt).getTime();
+    if (key === "margin") return marginMs;
+    if (key === "status") return marginMs >= 0 ? "Вовремя" : "Опоздание";
+    if (key === "result") return normalizeResult(mode === "general" ? timer.note : row.result);
+    return "";
+  }
+
+  function compareRouteSortValues(a, b) {
+    if (typeof a === "number" && typeof b === "number") {
+      const left = Number.isFinite(a) ? a : 0;
+      const right = Number.isFinite(b) ? b : 0;
+      return left - right;
+    }
+    return compareRouteText(a, b);
+  }
+
+  function compareRouteText(a, b) {
+    return String(a || "").localeCompare(String(b || ""), "ru", { numeric: true, sensitivity: "base" });
+  }
+
   function renderFleetRouteRows(rows) {
-    const sorted = rows.slice().sort((a, b) => String(a.fleet_name).localeCompare(String(b.fleet_name), "ru") || a.route_order - b.route_order);
+    const sorted = sortFleetRouteRows(rows);
     els.routeList.innerHTML = `
       <div class="route-table-wrap">
         <table class="route-table">
-          ${renderRouteTableHead(true)}
+          ${renderRouteTableHead(true, state.routeTableSort.fleet)}
           <tbody>
             ${sorted.map((row) => {
               const marginMs = new Date(row.end_at).getTime() - new Date(row.eta_at).getTime();
@@ -1098,28 +1166,30 @@
     updateRouteCountdowns();
   }
 
-  function renderRouteTableHead(showFleet) {
-    return `
-      <thead>
-        <tr>
-          <th>№</th>
-          ${showFleet ? "<th>Флот</th>" : ""}
-          <th>Система</th>
-          <th>Объект</th>
-          <th>Структура</th>
-          <th>Корпорация</th>
-          <th>Альянс</th>
-          <th>Режим</th>
-          <th>Таймер</th>
-          <th>Прыжки</th>
-          <th>ETA, EVE/UTC</th>
-          <th>Укреплён до, EVE/UTC</th>
-          <th>До таймера</th>
-          <th>Запас</th>
-          <th>Статус</th>
-          <th>Итог</th>
-        </tr>
-      </thead>`;
+  function renderRouteTableHead(showFleet, sort) {
+    const columns = [
+      ["order", "№"],
+      ...(showFleet ? [["fleet", "Флот"]] : []),
+      ["system", "Система"],
+      ["object_name", "Объект"],
+      ["structure", "Структура"],
+      ["corporation", "Корпорация"],
+      ["alliance", "Альянс"],
+      ["mode", "Режим"],
+      ["timer_kind", "Таймер"],
+      ["jumps", "Прыжки"],
+      ["eta", "ETA, EVE/UTC"],
+      ["end_at", "Укреплён до, EVE/UTC"],
+      ["remaining", "До таймера"],
+      ["margin", "Запас"],
+      ["status", "Статус"],
+      ["result", "Итог"]
+    ];
+    return `<thead><tr>${columns.map(([key, label]) => {
+      const active = sort.key === key;
+      const ariaSort = active ? sort.direction === "desc" ? "descending" : "ascending" : "none";
+      return `<th data-route-sort-key="${key}" aria-sort="${ariaSort}"><button class="table-sort-button" type="button">${label}</button></th>`;
+    }).join("")}</tr></thead>`;
   }
 
   function renderCopyableSystemCell(system) {
@@ -1192,6 +1262,26 @@
   }
 
   function handleRouteListClick(event) {
+    const sortHeader = event.target.closest("th[data-route-sort-key]");
+    if (sortHeader) {
+      const mode = sortHeader.closest(".route-table-general") ? "general" : "fleet";
+      const current = state.routeTableSort[mode];
+      const key = sortHeader.dataset.routeSortKey;
+      state.routeTableSort[mode] = current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: "asc" };
+      if (mode === "general" && state.generalPlan) {
+        renderGeneralCandidates(
+          state.generalPlan.candidates,
+          state.generalPlan.recommended,
+          state.generalPlan.secondsPerJump,
+          state.generalPlan.serviceMinutes
+        );
+      } else if (mode === "fleet") {
+        renderFleetRouteRows(state.routeRows);
+      }
+      return;
+    }
     const systemCell = event.target.closest("[data-copy-system]");
     if (systemCell) {
       const selection = window.getSelection();

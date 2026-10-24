@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261024-22" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-23" />
 </head>
 <body>
   <header class="topbar">
@@ -181,6 +181,7 @@ Hakatiz - 7-6
               <option value="time">по времени</option>
               <option value="title">по корпорации</option>
               <option value="system">по системе</option>
+              <option value="custom" hidden>по столбцу</option>
             </select>
           </label>
           <label class="checkline compact">
@@ -204,20 +205,20 @@ Hakatiz - 7-6
       </div>
 
       <div class="table-wrap">
-        <table>
+        <table id="timersTable">
           <thead>
             <tr>
-              <th>Система</th>
-              <th>Объект</th>
-              <th>Структура</th>
-              <th>Корпорация</th>
-              <th>Альянс</th>
-              <th>Режим</th>
-              <th>Таймер</th>
-              <th>Укреплён до, EVE/UTC</th>
-              <th>Осталось</th>
-              <th>Статус</th>
-              <th>Итог</th>
+              <th data-sort-key="system" aria-sort="none"><button class="table-sort-button" type="button">Система</button></th>
+              <th data-sort-key="object_name" aria-sort="none"><button class="table-sort-button" type="button">Объект</button></th>
+              <th data-sort-key="structure" aria-sort="none"><button class="table-sort-button" type="button">Структура</button></th>
+              <th data-sort-key="title" aria-sort="none"><button class="table-sort-button" type="button">Корпорация</button></th>
+              <th data-sort-key="owner" aria-sort="none"><button class="table-sort-button" type="button">Альянс</button></th>
+              <th data-sort-key="mode" aria-sort="none"><button class="table-sort-button" type="button">Режим</button></th>
+              <th data-sort-key="timer_kind" aria-sort="none"><button class="table-sort-button" type="button">Таймер</button></th>
+              <th data-sort-key="end_at" aria-sort="none"><button class="table-sort-button" type="button">Укреплён до, EVE/UTC</button></th>
+              <th data-sort-key="remaining" aria-sort="none"><button class="table-sort-button" type="button">Осталось</button></th>
+              <th data-sort-key="status" aria-sort="none"><button class="table-sort-button" type="button">Статус</button></th>
+              <th data-sort-key="result" aria-sort="none"><button class="table-sort-button" type="button">Итог</button></th>
               <th class="admin-only actions-col" hidden>Действия</th>
             </tr>
           </thead>
@@ -531,7 +532,7 @@ Hakatiz - 7-6
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20261024-9"></script>
-  <script src="js/routes.js?v=20261024-22"></script>
+  <script src="js/app.js?v=20261024-10"></script>
+  <script src="js/routes.js?v=20261024-23"></script>
 </body>
 </html>

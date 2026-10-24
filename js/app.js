@@ -61,6 +61,7 @@
   let adminViewEnabled = false;
   let adminKeyValidated = false;
   let viewAccessGranted = false;
+  let boardSort = { key: "end_at", direction: "asc" };
 
   const els = {
     configWarning: document.getElementById("configWarning"),
@@ -89,6 +90,7 @@
     clearInputBtn: document.getElementById("clearInputBtn"),
     parsePreview: document.getElementById("parsePreview"),
     adminStatus: document.getElementById("adminStatus"),
+    timersTable: document.getElementById("timersTable"),
     timersBody: document.getElementById("timersBody"),
     timerRowTemplate: document.getElementById("timerRowTemplate"),
     searchInput: document.getElementById("searchInput"),
@@ -145,7 +147,8 @@
     els.unlockViewBtn.addEventListener("click", unlockView);
     els.saveViewKeyBtn.addEventListener("click", saveViewKey);
     els.searchInput.addEventListener("input", renderTimers);
-    els.sortSelect.addEventListener("change", renderTimers);
+    els.sortSelect.addEventListener("change", handleSortSelectChange);
+    els.timersTable.querySelector("thead").addEventListener("click", handleBoardHeaderSort);
     els.showEnded.addEventListener("change", renderTimers);
     els.endedWindow.addEventListener("change", renderTimers);
     els.clearHistoryBtn.addEventListener("click", clearTimerHistory);
@@ -785,7 +788,6 @@
 
     const now = Date.now();
     const search = els.searchInput.value.trim().toLowerCase();
-    const sortMode = els.sortSelect.value;
     const showEnded = els.showEnded.checked;
     const endedWindowMs = getEndedWindowMs();
 
@@ -802,7 +804,9 @@
     const visible = enriched
       .filter((timer) => !timer.isCompleted || showEnded && isWithinEndedWindow(timer.completedAgeMs, endedWindowMs))
       .filter((timer) => !search || searchableText(timer).includes(search))
-      .sort((a, b) => compareTimers(a, b, sortMode));
+      .sort((a, b) => compareTimers(a, b, boardSort));
+
+    updateBoardSortHeaders();
 
     const signature = JSON.stringify({
       rows: visible.map((t) => [
@@ -815,10 +819,12 @@
         t.mode,
         t.distance,
         t.end_at,
-        t.note
+        t.note,
+        t.status.label
       ]),
       search,
-      sortMode,
+      sortKey: boardSort.key,
+      sortDirection: boardSort.direction,
       showEnded,
       endedWindow: els.endedWindow.value,
       adminMode: adminViewEnabled,
@@ -1261,14 +1267,53 @@
     return completedAgeMs <= endedWindowMs;
   }
 
-  function compareTimers(a, b, sortMode) {
-    if (sortMode === "title") {
-      return compareText(a.title || a.structure || a.system, b.title || b.structure || b.system) || compareTime(a, b);
+  function handleSortSelectChange() {
+    const sortKeys = { time: "end_at", title: "title", system: "system" };
+    if (sortKeys[els.sortSelect.value]) {
+      boardSort = { key: sortKeys[els.sortSelect.value], direction: "asc" };
     }
-    if (sortMode === "system") {
-      return compareText(a.system, b.system) || compareTime(a, b);
+    lastRenderedSignature = "";
+    renderTimers();
+  }
+
+  function handleBoardHeaderSort(event) {
+    const header = event.target.closest("th[data-sort-key]");
+    if (!header) return;
+    const key = header.dataset.sortKey;
+    boardSort = boardSort.key === key
+      ? { key, direction: boardSort.direction === "asc" ? "desc" : "asc" }
+      : { key, direction: "asc" };
+    const selectValues = { end_at: "time", title: "title", system: "system" };
+    els.sortSelect.value = boardSort.direction === "asc" && selectValues[key] ? selectValues[key] : "custom";
+    lastRenderedSignature = "";
+    renderTimers();
+  }
+
+  function updateBoardSortHeaders() {
+    els.timersTable.querySelectorAll("th[data-sort-key]").forEach((header) => {
+      const active = header.dataset.sortKey === boardSort.key;
+      header.setAttribute("aria-sort", active ? boardSort.direction === "asc" ? "ascending" : "descending" : "none");
+    });
+  }
+
+  function compareTimers(a, b, sort) {
+    const direction = sort.direction === "desc" ? -1 : 1;
+    const result = compareBoardSortValue(a, b, sort.key) || compareTime(a, b) || compareText(a.system, b.system);
+    return result * direction;
+  }
+
+  function compareBoardSortValue(a, b, key) {
+    if (key === "end_at") return compareTime(a, b);
+    if (key === "remaining") {
+      const aRemaining = a.isCompleted ? 0 : Math.max(0, new Date(a.end_at).getTime() - Date.now());
+      const bRemaining = b.isCompleted ? 0 : Math.max(0, new Date(b.end_at).getTime() - Date.now());
+      return aRemaining - bRemaining;
     }
-    return compareTime(a, b);
+    if (key === "object_name") return compareText(normalizeStructureType(a.object_name), normalizeStructureType(b.object_name));
+    if (key === "timer_kind") return compareText(normalizeTimerKind(a.distance), normalizeTimerKind(b.distance));
+    if (key === "status") return compareText(a.status.label, b.status.label);
+    if (key === "result") return compareText(normalizeStructureResult(a.note), normalizeStructureResult(b.note));
+    return compareText(a[key], b[key]);
   }
 
   function compareTime(a, b) {
