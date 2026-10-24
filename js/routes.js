@@ -145,6 +145,7 @@
     els.copyFleetKeyBtn.addEventListener("click", copyGeneratedFleetKey);
     els.fleetProfilesList.addEventListener("click", handleFleetProfileAction);
     els.routeList.addEventListener("click", handleRouteResultAction);
+    window.setInterval(updateRouteCountdowns, 1000);
 
     if (els.adminKey) {
       els.adminKey.addEventListener("change", () => {
@@ -808,6 +809,7 @@
         <div><strong>${escapeHtml(recommended.timer.system)}</strong><span>рекомендуемая следующая цель</span></div>
         <div><strong>${recommended.jumps}</strong><span>${escapeHtml(jumpWord(recommended.jumps))}</span></div>
         <div><strong>${escapeHtml(formatUtc(recommended.eta))}</strong><span>ETA, EVE/UTC</span></div>
+        <div><strong class="route-countdown" data-route-countdown="${escapeHtml(recommended.timer.end_at)}">${escapeHtml(formatCountdown(new Date(recommended.timer.end_at).getTime() - Date.now()))}</strong><span>до таймера</span></div>
         <div><strong class="route-margin ${recommended.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(recommended.marginMs))}</strong><span>запас</span></div>
       </div>
       <div class="route-table-wrap">
@@ -827,6 +829,7 @@
                 <td>${escapeHtml(formatJumpCount(candidate.jumps))}</td>
                 <td class="route-time-cell">${escapeHtml(formatUtc(candidate.eta))}</td>
                 <td class="route-time-cell">${escapeHtml(formatUtc(candidate.timer.end_at))}</td>
+                ${renderRouteCountdownCell(candidate.timer.end_at)}
                 <td class="route-margin ${candidate.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(candidate.marginMs))}</td>
                 <td>${renderRouteArrivalStatus(candidate.marginMs)}</td>
                 <td><div class="route-result-summary">${renderReadonlyResult(candidate.timer.note)}</div></td>
@@ -836,6 +839,7 @@
         </table>
       </div>
       <div class="route-list-note">Расчёт: ${secondsPerJump} сек/прыжок · ${serviceMinutes} мин/цель</div>`;
+    updateRouteCountdowns();
   }
 
   function restoreSelectedFleetKey() {
@@ -991,6 +995,7 @@
                   <td>${escapeHtml(formatJumpCount(row.jump_count))}</td>
                   <td class="route-time-cell">${escapeHtml(formatUtc(row.eta_at))}</td>
                   <td class="route-time-cell">${escapeHtml(formatUtc(row.end_at))}</td>
+                  ${renderRouteCountdownCell(row.end_at)}
                   <td class="route-margin ${marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(marginMs))}</td>
                   <td>${renderRouteArrivalStatus(marginMs)}</td>
                   <td><div class="route-result-summary">${renderRouteResultControl(row, result)}</div></td>
@@ -999,6 +1004,7 @@
           </tbody>
         </table>
       </div>`;
+    updateRouteCountdowns();
   }
 
   function renderRouteTableHead(showFleet) {
@@ -1017,11 +1023,25 @@
           <th>Прыжки</th>
           <th>ETA, EVE/UTC</th>
           <th>Укреплён до, EVE/UTC</th>
+          <th>До таймера</th>
           <th>Запас</th>
           <th>Статус</th>
           <th>Итог</th>
         </tr>
       </thead>`;
+  }
+
+  function renderRouteCountdownCell(endAt) {
+    return `<td class="route-time-cell route-countdown" data-route-countdown="${escapeHtml(endAt)}">${escapeHtml(formatCountdown(new Date(endAt).getTime() - Date.now()))}</td>`;
+  }
+
+  function updateRouteCountdowns() {
+    els.routeList.querySelectorAll("[data-route-countdown]").forEach((cell) => {
+      const remainingMs = new Date(cell.dataset.routeCountdown || "").getTime() - Date.now();
+      cell.textContent = formatCountdown(remainingMs);
+      cell.classList.toggle("is-soon", remainingMs > 0 && remainingMs <= 4 * 60 * 60 * 1000);
+      cell.classList.toggle("is-expired", remainingMs <= 0);
+    });
   }
 
   function routeValue(value) {
@@ -1836,6 +1856,17 @@
     const hours = Math.floor((totalMinutes % 1440) / 60);
     const minutes = totalMinutes % 60;
     return `${sign}${days ? `${days} д ` : ""}${pad(hours)}:${pad(minutes)}`;
+  }
+
+  function formatCountdown(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return "00:00:00";
+    const totalSeconds = Math.floor(ms / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const clock = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    return days ? `${days} д ${clock}` : clock;
   }
 
   function pad(value) {
