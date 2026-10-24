@@ -12,7 +12,7 @@
   const MAP_HEIGHT_KEY = `eve_timerboard_route_map_height_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
   const MAP_MIN_ZOOM = 1;
-  const MAP_MAX_ZOOM = 4;
+  const MAP_MAX_ZOOM = 8;
   const MAP_REGION_SYSTEM_LIMIT = 900;
   let viewAccessGranted = document.body.classList.contains("has-view-access");
 
@@ -150,9 +150,9 @@
       viewAccessGranted = Boolean(event.detail && event.detail.granted);
       updateRoutesAccess();
     });
-    els.routeZoomOutBtn.addEventListener("click", () => changeRouteZoom(-0.25));
+    els.routeZoomOutBtn.addEventListener("click", () => changeRouteZoom(-0.5));
     els.routeZoomResetBtn.addEventListener("click", resetRouteZoom);
-    els.routeZoomInBtn.addEventListener("click", () => changeRouteZoom(0.25));
+    els.routeZoomInBtn.addEventListener("click", () => changeRouteZoom(0.5));
     els.routeMap.addEventListener("wheel", handleRouteMapWheel, { passive: false });
     els.routeMap.addEventListener("pointerdown", startRouteMapPan);
     els.routeMap.addEventListener("pointermove", moveRouteMapPan);
@@ -1828,7 +1828,7 @@
   function handleRouteMapWheel(event) {
     if (!els.routeMap.querySelector(".route-map-stage") || !event.deltaY) return;
     event.preventDefault();
-    setRouteZoom(state.mapZoom + (event.deltaY < 0 ? 0.2 : -0.2), event.clientX, event.clientY);
+    setRouteZoom(state.mapZoom * (event.deltaY < 0 ? 1.18 : 1 / 1.18), event.clientX, event.clientY);
   }
 
   function setRouteZoom(value, clientX, clientY) {
@@ -1957,10 +1957,19 @@
       stage.style.width = `${state.mapZoom * 100}%`;
       stage.style.height = `${state.mapZoom * 100}%`;
     }
+    const svg = stage && stage.querySelector("svg");
+    const viewBox = svg && svg.viewBox ? svg.viewBox.baseVal : null;
+    const fitScale = viewBox && viewBox.width && viewBox.height
+      ? Math.max(0.05, Math.min(els.routeMap.clientWidth / viewBox.width, els.routeMap.clientHeight / viewBox.height))
+      : 1;
+    const zoomProgress = (state.mapZoom - MAP_MIN_ZOOM) / (MAP_MAX_ZOOM - MAP_MIN_ZOOM);
+    const viewportCompensation = 1 + Math.max(0, 1 / fitScale - 1) * zoomProgress;
     const labelGrowth = 1 + Math.min(0.36, Math.max(0, state.mapZoom - 1) * 0.12);
-    els.routeMap.style.setProperty("--route-label-font-size", `${13 * labelGrowth / state.mapZoom}px`);
-    els.routeMap.style.setProperty("--route-meta-font-size", `${11 * labelGrowth / state.mapZoom}px`);
-    els.routeMap.style.setProperty("--route-label-stroke-width", `${4 / state.mapZoom}px`);
+    const markerGrowth = 1 + Math.min(0.75, Math.max(0, state.mapZoom - 1) * 0.12);
+    els.routeMap.style.setProperty("--route-label-font-size", `${13 * labelGrowth * viewportCompensation / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--route-meta-font-size", `${11 * labelGrowth * viewportCompensation / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--route-label-stroke-width", `${4 * viewportCompensation / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--route-marker-scale", String(markerGrowth * viewportCompensation / state.mapZoom));
     els.routeMap.classList.toggle("is-zoomed", state.mapZoom >= 1.5);
     els.routeZoomOutBtn.disabled = state.mapZoom <= MAP_MIN_ZOOM;
     els.routeZoomInBtn.disabled = state.mapZoom >= MAP_MAX_ZOOM;

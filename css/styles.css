@@ -1073,7 +1073,15 @@ input.system-autocomplete.is-invalid {
   stroke: #06131c;
   stroke-width: 1.2;
   opacity: 0.84;
-  transition: opacity 0.12s ease, r 0.12s ease;
+  transition: opacity 0.12s ease, r 0.12s ease, transform 0.12s ease;
+}
+
+.map-context-node circle,
+.map-route-node circle,
+.route-node circle {
+  transform: scale(var(--route-marker-scale, 1));
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .map-context-node:hover circle {
