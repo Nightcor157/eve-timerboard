@@ -169,7 +169,8 @@
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
     els.copyFleetKeyBtn.addEventListener("click", copyGeneratedFleetKey);
     els.fleetProfilesList.addEventListener("click", handleFleetProfileAction);
-    els.routeList.addEventListener("click", handleRouteResultAction);
+    els.routeList.addEventListener("click", handleRouteListClick);
+    els.routeList.addEventListener("keydown", handleRouteListKeydown);
     window.setInterval(updateRouteCountdowns, 1000);
 
     if (els.adminKey) {
@@ -847,7 +848,7 @@
             ${candidates.map((candidate, index) => `
               <tr class="route-list-row ${candidate.marginMs < 0 ? "is-late" : ""}">
                 <td class="route-list-order">${index + 1}</td>
-                <td class="route-list-system">${escapeHtml(candidate.timer.system)}</td>
+                ${renderCopyableSystemCell(candidate.timer.system)}
                 <td>${routeValue(candidate.timer.object_name)}</td>
                 <td>${routeValue(candidate.timer.structure)}</td>
                 <td>${routeValue(candidate.timer.title)}</td>
@@ -1013,7 +1014,7 @@
                 <tr class="route-list-row ${marginMs < 0 ? "is-late" : ""}" data-timer-id="${escapeHtml(row.timer_id)}" data-fleet-id="${escapeHtml(row.fleet_id)}">
                   <td class="route-list-order">${Number(row.route_order)}</td>
                   <td><span class="route-fleet-cell"><span class="route-legend-swatch" style="--fleet-color:${safeColor(row.fleet_color || "#27a7d8")}"></span>${escapeHtml(row.fleet_name)}</span></td>
-                  <td class="route-list-system">${escapeHtml(row.timer_system)}</td>
+                  ${renderCopyableSystemCell(row.timer_system)}
                   <td>${routeValue(row.object_name)}</td>
                   <td>${routeValue(row.structure)}</td>
                   <td>${routeValue(row.corporation)}</td>
@@ -1057,6 +1058,13 @@
           <th>Итог</th>
         </tr>
       </thead>`;
+  }
+
+  function renderCopyableSystemCell(system) {
+    const value = String(system || "").trim();
+    if (!value) return '<td class="route-list-system">—</td>';
+    const escaped = escapeHtml(value);
+    return `<td class="route-list-system copyable-system" data-copy-system="${escaped}" tabindex="0" role="button" title="Нажмите, чтобы скопировать название системы" aria-label="Скопировать систему ${escaped}">${escaped}</td>`;
   }
 
   function renderRouteCountdownCell(endAt) {
@@ -1119,6 +1127,66 @@
     return !adminViewEnabled &&
       Boolean(state.selectedFleetKey) &&
       String(row.fleet_id) === String(state.selectedFleetId);
+  }
+
+  function handleRouteListClick(event) {
+    const systemCell = event.target.closest("[data-copy-system]");
+    if (systemCell) {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+        copyRouteSystem(systemCell);
+      }
+      return;
+    }
+    handleRouteResultAction(event);
+  }
+
+  function handleRouteListKeydown(event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const systemCell = event.target.closest("[data-copy-system]");
+    if (!systemCell) return;
+    event.preventDefault();
+    copyRouteSystem(systemCell);
+  }
+
+  async function copyRouteSystem(cell) {
+    const system = String(cell.dataset.copySystem || "").trim();
+    if (!system) return;
+
+    const copied = await copyTextToClipboard(system);
+    cell.classList.remove("is-copied", "is-copy-failed");
+    cell.classList.add(copied ? "is-copied" : "is-copy-failed");
+    window.setTimeout(() => {
+      cell.classList.remove("is-copied", "is-copy-failed");
+    }, 900);
+  }
+
+  async function copyTextToClipboard(value) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch (_error) {
+        // Use the fallback below when clipboard permission is unavailable.
+      }
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (_error) {
+      copied = false;
+    }
+    textarea.remove();
+    return copied;
   }
 
   async function handleRouteResultAction(event) {
