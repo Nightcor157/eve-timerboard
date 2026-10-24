@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { STRUCTURE_RESULTS, STRUCTURE_TYPES, TIMER_KINDS } from "../js/core/constants.js";
 import { projectRoot } from "./helpers/server.mjs";
 
 const sql = await readFile(resolve(projectRoot, "supabase/schema.sql"), "utf8");
@@ -13,6 +14,10 @@ assert.match(sql, /jsonb_object_keys\(p_changes\)/i);
 assert.match(sql, /updated_at\s*=\s*p_expected_updated_at/i);
 assert.match(sql, /timer update conflict/i);
 assert.match(sql, /is distinct from v_timer\.note/i);
+assert.match(sql, /add column if not exists completed_at timestamptz/i);
+assert.match(sql, /create or replace function public\.set_timer_completed_at/i);
+assert.match(sql, /set_fleet_timer_result[\s\S]*p_expected_updated_at timestamptz[\s\S]*timer update conflict/i);
+assert.match(sql, /timer_updated_at timestamptz/i);
 
 assert.match(sql, /create or replace function public\.add_timer\s*\(/i);
 assert.match(sql, /create function public\.update_timer_admin_fields\s*\(/i);
@@ -25,5 +30,21 @@ assert.match(sql, /timers_distance_values_chk[\s\S]*not valid/i);
 assert.match(sql, /timers_note_values_chk[\s\S]*not valid/i);
 assert.match(sql, /admin key must be at least 12 characters/i);
 assert.match(sql, /view key must be at least 12 characters/i);
+
+function sqlValidationValues(functionName) {
+  const functionMatch = sql.match(new RegExp(
+    `create or replace function public\\.${functionName}\\([\\s\\S]*?\\bas \\$\\$([\\s\\S]*?)\\$\\$;`,
+    "i"
+  ));
+  assert.ok(functionMatch, `SQL validation helper not found: ${functionName}`);
+  const listMatch = functionMatch[1].match(/\bin\s*\(([\s\S]*?)\)/i);
+  assert.ok(listMatch, `SQL validation list not found: ${functionName}`);
+  return [...listMatch[1].matchAll(/'((?:''|[^'])*)'/g)]
+    .map((match) => match[1].replaceAll("''", "'"));
+}
+
+assert.deepEqual(sqlValidationValues("is_valid_structure_type"), ["", ...STRUCTURE_TYPES]);
+assert.deepEqual(sqlValidationValues("is_valid_timer_kind"), ["", ...TIMER_KINDS]);
+assert.deepEqual(sqlValidationValues("is_valid_timer_result"), ["", ...STRUCTURE_RESULTS]);
 
 console.log("PASS Supabase data-safety contracts");

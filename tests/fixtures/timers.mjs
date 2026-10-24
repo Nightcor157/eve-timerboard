@@ -21,6 +21,7 @@ export function makeTimer(overrides = {}) {
     mode: "Reinforced",
     end_at: futureIso(6),
     note: "",
+    completed_at: null,
     created_at: pastIso(24),
     updated_at: pastIso(0, 1),
     ...overrides

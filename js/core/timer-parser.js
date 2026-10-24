@@ -1,7 +1,8 @@
 import {
   cleanText,
   normalizeStructureType,
-  normalizeTimerKind
+  normalizeTimerKind,
+  utcPartsToIso
 } from "../shared/format.js";
 
 export function parseTimerInput(input, defaults = {}) {
@@ -75,8 +76,8 @@ export function parseTimerBlock(block) {
   const dateMatch = getTimerDateMatch(block);
   if (!dateMatch) throw new Error(`Не нашёл дату в формате 2026.05.25 14:42:47: ${firstLine}`);
   const [, year, month, day, hour, minute, second = "0"] = dateMatch;
-  const endDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
-  if (Number.isNaN(endDate.getTime())) throw new Error(`Некорректная дата: ${dateMatch[0]}`);
+  const endAt = utcPartsToIso(year, month, day, hour, minute, second);
+  if (!endAt) throw new Error(`Некорректная дата: ${dateMatch[0]}`);
 
   const modeLine = lines.find(hasTimerDate) || "";
   const mode = cleanText(modeLine.replace(/\s+(?:до|until)\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?.*$/i, ""));
@@ -89,7 +90,7 @@ export function parseTimerBlock(block) {
     owner,
     distance: "",
     mode,
-    end_at: endDate.toISOString(),
+    end_at: endAt,
     note: ""
   };
 }

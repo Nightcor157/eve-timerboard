@@ -40,6 +40,7 @@ import { sortBoardTimers } from "./ui/board-view.js";
   let viewAccessGranted = false;
   let boardSort = { key: "end_at", direction: "asc" };
   let loadGeneration = 0;
+  let timersDataSignature = "";
 
   const els = {
     configWarning: document.getElementById("configWarning"),
@@ -101,7 +102,8 @@ import { sortBoardTimers } from "./ui/board-view.js";
       els.configWarning.hidden = false;
     }
 
-    const savedKey = localStorage.getItem(ADMIN_KEY_STORAGE);
+    localStorage.removeItem(ADMIN_KEY_STORAGE);
+    const savedKey = sessionStorage.getItem(ADMIN_KEY_STORAGE);
     if (savedKey) {
       els.adminKey.value = savedKey;
       els.rememberKey.checked = true;
@@ -142,16 +144,16 @@ import { sortBoardTimers } from "./ui/board-view.js";
       closeAdminAccessDialog();
     });
     els.rememberKey.addEventListener("change", () => {
-      if (!els.rememberKey.checked) localStorage.removeItem(ADMIN_KEY_STORAGE);
+      if (!els.rememberKey.checked) sessionStorage.removeItem(ADMIN_KEY_STORAGE);
       if (els.rememberKey.checked && els.adminKey.value.trim()) {
-        localStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
+        sessionStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
       }
     });
     els.adminKey.addEventListener("change", () => {
       adminKeyValidated = false;
       els.adminViewKey.value = els.adminKey.value.trim();
       if (els.rememberKey.checked) {
-        localStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
+        sessionStorage.setItem(ADMIN_KEY_STORAGE, els.adminKey.value.trim());
       }
       loadTimers();
     });
@@ -254,9 +256,9 @@ import { sortBoardTimers } from "./ui/board-view.js";
     els.adminViewKey.value = adminKey;
     els.rememberKey.checked = els.rememberAdminViewKey.checked;
     if (els.rememberAdminViewKey.checked) {
-      localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+      sessionStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
     } else {
-      localStorage.removeItem(ADMIN_KEY_STORAGE);
+      sessionStorage.removeItem(ADMIN_KEY_STORAGE);
     }
     closeAdminAccessDialog();
     applyAdminView(true);
@@ -339,6 +341,7 @@ import { sortBoardTimers } from "./ui/board-view.js";
         timers = readLocalTimers().map(normalizeTimer);
       }
       renderTimers();
+      publishTimersRefresh();
     } catch (err) {
       if (!isCurrentTimerLoad(requestGeneration, requestedKey)) return;
       const message = friendlyDbError(err);
@@ -365,6 +368,16 @@ import { sortBoardTimers } from "./ui/board-view.js";
     viewAccessGranted = Boolean(granted);
     document.body.classList.toggle("has-view-access", viewAccessGranted);
     appController.emit(APP_EVENTS.VIEW_ACCESS_CHANGED, { granted: viewAccessGranted });
+  }
+
+  function publishTimersRefresh() {
+    const nextSignature = timers
+      .map((timer) => `${timer.id}:${timer.updated_at}:${timer.completed_at || ""}`)
+      .sort()
+      .join("|");
+    if (nextSignature === timersDataSignature) return;
+    timersDataSignature = nextSignature;
+    appController.emit(APP_EVENTS.TIMERS_REFRESHED, { signature: nextSignature });
   }
 
   function getReadKey() {
@@ -450,6 +463,7 @@ import { sortBoardTimers } from "./ui/board-view.js";
       mode: row.mode || "",
       end_at: row.end_at,
       note: row.note || "",
+      completed_at: row.completed_at || null,
       created_at: row.created_at || new Date().toISOString(),
       updated_at: row.updated_at || row.created_at || row.end_at
     };
@@ -515,7 +529,7 @@ import { sortBoardTimers } from "./ui/board-view.js";
       }
 
       if (els.rememberKey.checked && adminKey) {
-        localStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
+        sessionStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
       }
 
       els.timerInput.value = "";
@@ -786,7 +800,8 @@ import { sortBoardTimers } from "./ui/board-view.js";
     timers = timers.map((timer) => String(timer.id) === String(detail.timerId) ? {
       ...timer,
       note: result,
-      updated_at: new Date().toISOString()
+      completed_at: detail.completedAt || (result ? new Date().toISOString() : null),
+      updated_at: detail.updatedAt || new Date().toISOString()
     } : timer);
     if (result) els.showEnded.checked = true;
     lastRenderedSignature = "";
@@ -803,24 +818,28 @@ import { sortBoardTimers } from "./ui/board-view.js";
   async function saveFleetBoardResult(timer, value) {
     if (!db || !canFleetEditResult(timer.id)) return;
     try {
-      const { error } = await db.setFleetTimerResult(
+      const { data, error } = await db.setFleetTimerResult(
         BOARD_ID,
         getReadKey(),
         fleetBoardAccess.fleetKey,
         fleetBoardAccess.fleetId,
         timer.id,
-        normalizeStructureResult(value)
+        normalizeStructureResult(value),
+        timer.updated_at
       );
       if (error) throw error;
-      timers = timers.map((item) => item.id === timer.id ? {
-        ...item,
-        note: normalizeStructureResult(value),
-        updated_at: new Date().toISOString()
-      } : item);
+      if (!data) throw new Error("set_fleet_timer_result returned no timer");
+      const serverTimer = normalizeTimer(data);
+      timers = timers.map((item) => item.id === timer.id ? serverTimer : item);
       lastRenderedSignature = "";
       renderTimers();
       appController.emit(APP_EVENTS.BOARD_RESULT_UPDATED);
     } catch (err) {
+      if (isTimerUpdateConflict(err)) {
+        setStatus("Итог уже изменён в другом окне. Доска обновлена, повторите действие при необходимости.", true);
+        await loadTimers();
+        return;
+      }
       setStatus(`Ошибка результата: ${friendlyDbError(err)}`, true);
       lastRenderedSignature = "";
       renderTimers();
@@ -1068,6 +1087,9 @@ import { sortBoardTimers } from "./ui/board-view.js";
         const local = readLocalTimers().map((item) => item.id === timer.id ? (localTimer = {
           ...item,
           ...patch,
+          completed_at: Object.hasOwn(patch, "note")
+            ? normalizeStructureResult(patch.note) ? new Date().toISOString() : null
+            : item.completed_at || null,
           updated_at: new Date().toISOString()
         }) : item);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(local));

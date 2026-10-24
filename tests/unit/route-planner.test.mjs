@@ -57,7 +57,7 @@ test("builds a deterministic sequential route for one fleet", async () => {
   assert.ok(candidates.every((item) => Number.isFinite(item.marginMs)));
 });
 
-test("v2 fixes a locally early choice without accepting a worse plan", async () => {
+test("v2 uses all available fleets while still reducing jumps", async () => {
   const v2Routes = new Map([
     ["1:2", [1, 2]],
     ["4:2", [4, 5, 2]],
@@ -79,13 +79,47 @@ test("v2 fixes a locally early choice without accepting a worse plan", async () 
   const baseline = await planFleetAssignments({ fleets, targets, resolveSystem, getRoute: v2GetRoute, now });
   assert.deepEqual(baseline.map((item) => item.fleet_id), ["fleet-1", "fleet-2"]);
   const result = await planFleetAssignmentsV2({ fleets, targets, resolveSystem, getRoute: v2GetRoute, now });
-  assert.deepEqual(result.assignments.map((item) => item.fleet_id), ["fleet-1", "fleet-1"]);
+  assert.deepEqual(result.assignments.map((item) => item.fleet_id), ["fleet-1", "fleet-2"]);
   assert.equal(result.baselineMetrics.totalJumps, 6);
-  assert.equal(result.metrics.totalJumps, 2);
+  assert.equal(result.metrics.totalJumps, 4);
+  assert.equal(result.metrics.idleFleetCount, 0);
+  assert.equal(result.metrics.assignmentSpread, 0);
   assert.equal(result.metrics.lateCount, 0);
   assert.equal(result.improved, true);
   assert.ok(comparePlanMetrics(result.metrics, result.baselineMetrics) < 0);
   assert.ok(result.metrics.candidateEvaluations > 0);
+});
+
+test("v2 balances targets by workload while preserving deadlines", async () => {
+  const balancedSystems = new Map(Array.from({ length: 8 }, (_, index) => [
+    `s${index + 1}`,
+    { id: index + 1, name: `S${index + 1}` }
+  ]));
+  const balancedResolve = (name) => balancedSystems.get(String(name).toLowerCase());
+  const balancedRoute = async (from, to) => from === to ? [from] : [from, to];
+  const fleets = Array.from({ length: 4 }, (_, index) => ({
+    fleet_id: `fleet-${index + 1}`,
+    current_system: "S1",
+    seconds_per_jump: 60,
+    service_minutes: 5
+  }));
+  const targets = Array.from({ length: 6 }, (_, index) => ({
+    id: `timer-${index + 1}`,
+    system: `S${index + 2}`,
+    end_at: new Date(now + (60 + index * 10) * 60 * 1000).toISOString()
+  }));
+
+  const result = await planFleetAssignmentsV2({
+    fleets,
+    targets,
+    resolveSystem: balancedResolve,
+    getRoute: balancedRoute,
+    now
+  });
+  const counts = fleets.map((fleet) => result.assignments.filter((item) => item.fleet_id === fleet.fleet_id).length);
+  assert.equal(result.metrics.lateCount, 0);
+  assert.equal(result.metrics.idleFleetCount, 0);
+  assert.ok(Math.max(...counts) - Math.min(...counts) <= 1);
 });
 
 test("v2 never scores worse than baseline across 40-target scenarios", async () => {
@@ -120,5 +154,6 @@ test("v2 never scores worse than baseline across 40-target scenarios", async () 
     assert.ok(comparePlanMetrics(result.metrics, result.baselineMetrics) <= 0, `scenario ${scenario}`);
     assert.equal(result.assignments.length, 40);
     assert.equal(new Set(result.assignments.map((item) => item.timer_id)).size, 40);
+    assert.equal(result.metrics.idleFleetCount, 0, `scenario ${scenario}: idle fleet`);
   }
 });

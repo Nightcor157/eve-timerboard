@@ -52,7 +52,8 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     boardAccessFleetId: "",
     generalPlan: null,
     lastPlanMetrics: null,
-    loadingFleets: false
+    routeLoadGeneration: 0,
+    generalPlanGeneration: 0
   };
 
   const els = {
@@ -127,6 +128,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
   init();
 
   function init() {
+    removeLegacyFleetKeys();
     populateMultiFilter(els.generalTimerKindFilter, TIMER_KINDS);
     populateMultiFilter(els.generalObjectFilter, STRUCTURE_TYPES);
     populateMultiFilter(els.fleetTimerKindFilter, TIMER_KINDS);
@@ -160,6 +162,14 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     els.reloadRouteBtn.addEventListener("click", reloadCurrentRoute);
     appController.on(APP_EVENTS.BOARD_RESULT_UPDATED, () => {
       if (state.mapMode === "fleet") reloadCurrentRoute();
+    });
+    appController.on(APP_EVENTS.TIMERS_REFRESHED, () => {
+      if (els.routesView.hidden) return;
+      if (state.mapMode === "fleet") {
+        void reloadCurrentRoute();
+      } else if (state.generalPlan) {
+        void buildGeneralRoute();
+      }
     });
     appController.on(APP_EVENTS.ADMIN_VIEW_CHANGED, (event) => {
       adminViewEnabled = Boolean(event.detail && event.detail.enabled);
@@ -293,8 +303,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       setLine(els.fleetAdminStatus, "Для маршрутов требуется настроенный Supabase.", true);
       return;
     }
-    if (state.loadingFleets) return;
-    state.loadingFleets = true;
+    const requestGeneration = ++state.routeLoadGeneration;
     try {
       if (adminViewEnabled) {
         const adminKey = getAdminKey();
@@ -302,36 +311,38 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
           setLine(els.fleetAdminStatus, "Введи главный админ-ключ на вкладке доски.", true);
           return;
         }
-        await loadAdminFleets();
-        if (state.mapMode === "fleet") await loadAllFleetRoutes();
+        if (!await loadAdminFleets(requestGeneration)) return;
+        if (state.mapMode === "fleet") await loadAllFleetRoutes(requestGeneration);
       } else {
         const readKey = getReadKey();
         if (!readKey) {
           setLine(els.fleetLoginStatus, "Сначала открой доску ключом просмотра.", true);
           return;
         }
-        await loadPublicFleets();
+        await loadPublicFleets(requestGeneration);
       }
     } catch (err) {
+      if (requestGeneration !== state.routeLoadGeneration) return;
       const message = friendlyError(err);
       setLine(els.fleetLoginStatus, message, true);
       setLine(els.fleetAdminStatus, message, true);
-    } finally {
-      state.loadingFleets = false;
     }
   }
 
-  async function loadPublicFleets() {
+  async function loadPublicFleets(requestGeneration = ++state.routeLoadGeneration) {
     const { data, error } = await db.listFleets(BOARD_ID, getReadKey());
     if (error) throw error;
+    if (requestGeneration !== state.routeLoadGeneration) return false;
     state.fleets = data || [];
     renderFleetSelect();
     setLine(els.fleetLoginStatus, state.fleets.length ? "" : "Активных флотов пока нет.", false);
+    return true;
   }
 
-  async function loadAdminFleets() {
+  async function loadAdminFleets(requestGeneration = ++state.routeLoadGeneration) {
     const { data, error } = await db.listFleetsAdmin(BOARD_ID, getAdminKey());
     if (error) throw error;
+    if (requestGeneration !== state.routeLoadGeneration) return false;
     state.adminFleets = data || [];
     state.fleets = state.adminFleets
       .filter((fleet) => fleet.active)
@@ -343,6 +354,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     renderFleetProfiles();
     renderFleetSelect();
     setLine(els.fleetAdminStatus, "", false);
+    return true;
   }
 
   function renderFleetSelect() {
@@ -668,13 +680,17 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       setLine(els.generalRouteStatus, "Сначала открой доску ключом просмотра.", true);
       return;
     }
+    const requestGeneration = ++state.generalPlanGeneration;
+    const isCurrentRequest = () => requestGeneration === state.generalPlanGeneration;
 
     els.buildGeneralRouteBtn.disabled = true;
     setLine(els.generalRouteStatus, "Сравниваю активные таймеры…", false);
     try {
       const origin = await requireSystemName(enteredOrigin, els.generalOriginSystem);
+      if (!isCurrentRequest()) return;
       els.generalOriginSystem.value = origin;
       const timers = await loadTimersForRoutes(readKey);
+      if (!isCurrentRequest()) return;
       const filters = readRouteFilters(els.generalTimerKindFilter, els.generalObjectFilter);
       const targets = activeRouteTargets(timers, filters);
       if (!targets.length) {
@@ -682,6 +698,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       }
 
       const resolved = await resolveSystemNames([origin, ...targets.map((timer) => timer.system)]);
+      if (!isCurrentRequest()) return;
       const originSystem = resolved.get(normalizeName(origin));
       if (!originSystem) throw new Error(`Система не найдена в каталоге EVE: ${origin}`);
 
@@ -695,17 +712,23 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
         resolveSystem: (name) => resolved.get(normalizeName(name)),
         getRoute,
         now: Date.now(),
-        onProgress: ({ index, total, timer }) => setLine(
-          els.generalRouteStatus,
-          `Расчёт цели ${index + 1} из ${total}: ${timer.system}…`,
-          false
-        )
+        onProgress: ({ index, total, timer }) => {
+          if (isCurrentRequest()) {
+            setLine(
+              els.generalRouteStatus,
+              `Расчёт цели ${index + 1} из ${total}: ${timer.system}…`,
+              false
+            );
+          }
+        }
       });
+      if (!isCurrentRequest()) return;
 
       if (!candidates.length) throw new Error("Не удалось построить путь ни к одной цели.");
       const recommended = candidates[0];
       const allRouteIds = [...new Set(candidates.flatMap((candidate) => candidate.routeIds))];
       const names = await resolveIdsToNames(allRouteIds);
+      if (!isCurrentRequest()) return;
       const nodes = [];
       const segments = [];
       for (const candidate of candidates) {
@@ -745,9 +768,10 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
         false
       );
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setLine(els.generalRouteStatus, friendlyError(err), true);
     } finally {
-      els.buildGeneralRouteBtn.disabled = false;
+      if (isCurrentRequest()) els.buildGeneralRouteBtn.disabled = false;
     }
   }
 
@@ -820,7 +844,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       els.rememberFleetKey.checked = false;
       return;
     }
-    const saved = localStorage.getItem(FLEET_KEY_PREFIX + fleetId) || "";
+    const saved = sessionStorage.getItem(FLEET_KEY_PREFIX + fleetId) || "";
     els.fleetLoginKey.value = saved;
     els.rememberFleetKey.checked = Boolean(saved);
   }
@@ -829,9 +853,16 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     const fleetId = els.fleetLoginSelect.value;
     if (!fleetId) return;
     if (els.rememberFleetKey.checked && els.fleetLoginKey.value.trim()) {
-      localStorage.setItem(FLEET_KEY_PREFIX + fleetId, els.fleetLoginKey.value.trim());
+      sessionStorage.setItem(FLEET_KEY_PREFIX + fleetId, els.fleetLoginKey.value.trim());
     } else {
-      localStorage.removeItem(FLEET_KEY_PREFIX + fleetId);
+      sessionStorage.removeItem(FLEET_KEY_PREFIX + fleetId);
+    }
+  }
+
+  function removeLegacyFleetKeys() {
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key && key.startsWith(FLEET_KEY_PREFIX)) localStorage.removeItem(key);
     }
   }
 
@@ -843,11 +874,13 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       return;
     }
     els.fleetLoginKey.value = fleetKey;
+    const requestGeneration = ++state.routeLoadGeneration;
 
     els.openFleetRouteBtn.disabled = true;
     try {
       const { data, error } = await db.getFleetRoute(BOARD_ID, getReadKey(), fleetId, fleetKey);
       if (error) throw error;
+      if (requestGeneration !== state.routeLoadGeneration) return;
       state.selectedFleetId = fleetId;
       state.selectedFleetKey = fleetKey;
       state.routeRows = data || [];
@@ -857,20 +890,23 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
       setLine(els.fleetLoginStatus, "Маршрут открыт. Итог можно поставить прямо в строке цели или на доске.", false);
     } catch (err) {
+      if (requestGeneration !== state.routeLoadGeneration) return;
       state.selectedFleetKey = "";
       publishFleetBoardAccess("", "", []);
       setLine(els.fleetLoginStatus, friendlyError(err), true);
     } finally {
-      els.openFleetRouteBtn.disabled = false;
+      if (requestGeneration === state.routeLoadGeneration) els.openFleetRouteBtn.disabled = false;
     }
   }
 
-  async function loadAllFleetRoutes() {
+  async function loadAllFleetRoutes(requestGeneration = ++state.routeLoadGeneration) {
     if (!getAdminKey()) return;
     const { data, error } = await db.getAllFleetRoutes(BOARD_ID, getAdminKey());
     if (error) throw error;
+    if (requestGeneration !== state.routeLoadGeneration) return false;
     state.routeRows = data || [];
     renderFleetRoutes(state.routeRows, "Все флоты");
+    return true;
   }
 
   function renderFleetRoutes(rows, title) {
@@ -1202,18 +1238,20 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     if (group) group.querySelectorAll("button").forEach((item) => { item.disabled = true; });
 
     try {
-      const { error } = await db.setFleetTimerResult(
+      const { data, error } = await db.setFleetTimerResult(
         BOARD_ID,
         getReadKey(),
         state.selectedFleetKey,
         state.selectedFleetId,
         row.timer_id,
-        nextResult
+        nextResult,
+        row.timer_updated_at
       );
       if (error) throw error;
+      if (!data) throw new Error("set_fleet_timer_result returned no timer");
       state.routeRows = state.routeRows.map((item) =>
         String(item.timer_id) === String(row.timer_id) && String(item.fleet_id) === String(row.fleet_id)
-          ? { ...item, result: nextResult }
+          ? { ...item, result: data.note || "", timer_updated_at: data.updated_at }
           : item
       );
       const fleet = state.fleets.find((item) => String(item.fleet_id) === String(state.selectedFleetId));
@@ -1221,9 +1259,16 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
       setLine(els.fleetLoginStatus, nextResult ? `Итог «${nextResult}» сохранён.` : "Итог сброшен.", false);
       appController.emit(APP_EVENTS.ROUTE_RESULT_UPDATED, {
         timerId: String(row.timer_id),
-        result: nextResult
+        result: data.note || "",
+        completedAt: data.completed_at || null,
+        updatedAt: data.updated_at
       });
     } catch (err) {
+      if (isTimerUpdateConflict(err)) {
+        setLine(els.fleetLoginStatus, "Итог уже изменён в другом окне. Маршрут обновлён, повторите действие при необходимости.", true);
+        await reloadCurrentRoute();
+        return;
+      }
       setLine(els.fleetLoginStatus, `Ошибка итога: ${friendlyError(err)}`, true);
       const fleet = state.fleets.find((item) => String(item.fleet_id) === String(state.selectedFleetId));
       renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
@@ -1453,6 +1498,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     if (/wrong fleet key/i.test(message)) return "Неверный ключ флота.";
     if (/fleet not found or inactive/i.test(message)) return "Флот не найден или выключен.";
     if (/wrong admin key/i.test(message)) return "Неверный главный админ-ключ.";
+    if (/timer update conflict/i.test(message) || err?.code === "40001") return "Таймер уже изменён в другом окне.";
     if (/28000/i.test(message)) return "Неверный ключ доступа.";
     if (/duplicate key.*fleet_profiles|fleet_profiles_board_id_name/i.test(message)) return "Флот с таким названием уже существует.";
     if (/function .* does not exist|schema cache|list_fleets|create_fleet/i.test(message)) {
@@ -1460,6 +1506,11 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     }
     if (/Failed to fetch|NetworkError/i.test(message)) return "Не удалось связаться с ESI или Supabase.";
     return message;
+  }
+
+  function isTimerUpdateConflict(err) {
+    const message = err && (err.message || err.details) ? `${err.message || ""} ${err.details || ""}` : String(err || "");
+    return err?.code === "40001" || /timer update conflict/i.test(message);
   }
 
   function normalizeResult(value) {

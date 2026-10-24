@@ -244,6 +244,21 @@ async function runScenario(browser, definition) {
     assert.equal(await page.locator("#routeList [data-route-countdown]").count(), eligibleTimers.length, "Countdown cell count");
     assert.deepEqual(browserErrors, []);
 
+    if (eligibleTimers.length >= fleets.length) {
+      assert.ok(Math.min(...Object.values(counts)) > 0, "Every active fleet must receive a target");
+    }
+    if (definition.name === "defense-metenox-only") {
+      assert.ok(
+        Math.max(...Object.values(counts)) - Math.min(...Object.values(counts)) <= 1,
+        "Filtered Metenox targets must stay evenly distributed"
+      );
+    }
+    if (definition.name === "mixed-speed-tight") {
+      const workloads = Object.values(workloadMinutes);
+      assert.ok(Math.max(...workloads) - Math.min(...workloads) <= 6, "Mixed fleet workload must stay balanced");
+      assert.ok(counts["Флот 1"] > counts["Флот 4"], "The faster fleet should receive more targets");
+    }
+
     if (definition.name === "clustered") {
       await page.click('#routeList th[data-route-sort-key="system"] .table-sort-button');
       const ascending = await page.locator("#routeList .route-list-system").allTextContents();

@@ -42,6 +42,43 @@ await runBrowserTest("routes require view access", async ({ page }) => {
   assert.equal(await page.locator("#boardView").evaluate((element) => element.hidden), false);
 });
 
+await runBrowserTest("latest fleet list response wins", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("eve_timerboard_view_key_main", "view-test-key");
+    window.__fleetListCalls = 0;
+    window.supabase = {
+      createClient: () => ({
+        rpc: async (name) => {
+          if (name === "get_timers") return { data: [], error: null };
+          if (name !== "list_fleets") return { data: [], error: null };
+          window.__fleetListCalls += 1;
+          if (window.__fleetListCalls === 1) {
+            return new Promise((resolve) => setTimeout(() => resolve({
+              data: [{ fleet_id: "fleet-stale", fleet_name: "Старый флот", fleet_color: "#27a7d8" }],
+              error: null
+            }), 180));
+          }
+          return {
+            data: [{ fleet_id: "fleet-fresh", fleet_name: "Актуальный флот", fleet_color: "#27a7d8" }],
+            error: null
+          };
+        }
+      })
+    };
+  });
+  await blockExternalRequests(page);
+  await page.goto(`${baseURL}/#board`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !document.querySelector("#routesTab")?.classList.contains("is-locked"));
+  await page.evaluate(() => {
+    document.querySelector("#routesTab").click();
+    document.querySelector("#routesTab").click();
+  });
+  await page.waitForFunction(() => window.__fleetListCalls >= 2 && document.querySelector('#fleetLoginSelect option[value="fleet-fresh"]'));
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('#fleetLoginSelect option[value="fleet-fresh"]').count(), 1);
+  assert.equal(await page.locator('#fleetLoginSelect option[value="fleet-stale"]').count(), 0);
+});
+
 function locationHash(url) {
   return new URL(url).hash;
 }

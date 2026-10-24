@@ -32,6 +32,33 @@ export function getTimerboardApi(config = window.EVE_TIMERBOARD_CONFIG || {}) {
 
 export function createTimerboardApi(client) {
   const rpc = (name, params) => client.rpc(name, params);
+  const setFleetTimerResult = async (
+    boardId,
+    viewKey,
+    accessKey,
+    fleetId,
+    timerId,
+    result,
+    expectedUpdatedAt
+  ) => {
+    const legacyParams = {
+      p_board_id: boardId,
+      p_view_key: viewKey,
+      p_access_key: accessKey,
+      p_fleet_id: fleetId,
+      p_timer_id: timerId,
+      p_result: result
+    };
+    if (!expectedUpdatedAt) return rpc("set_fleet_timer_result", legacyParams);
+
+    const response = await rpc("set_fleet_timer_result", {
+      ...legacyParams,
+      p_expected_updated_at: expectedUpdatedAt
+    });
+    if (!isMissingRpcSignature(response.error)) return response;
+    return rpc("set_fleet_timer_result", legacyParams);
+  };
+
   return Object.freeze({
     listFleetsAdmin: (boardId, adminKey) => rpc("list_fleets_admin", {
       p_board_id: boardId,
@@ -60,15 +87,7 @@ export function createTimerboardApi(client) {
       p_board_id: boardId,
       p_admin_key: adminKey
     }),
-    setFleetTimerResult: (boardId, viewKey, accessKey, fleetId, timerId, result) =>
-      rpc("set_fleet_timer_result", {
-        p_board_id: boardId,
-        p_view_key: viewKey,
-        p_access_key: accessKey,
-        p_fleet_id: fleetId,
-        p_timer_id: timerId,
-        p_result: result
-      }),
+    setFleetTimerResult,
     patchTimer: (boardId, adminKey, timerId, changes, expectedUpdatedAt) =>
       rpc("patch_timer_admin_fields", {
         p_board_id: boardId,
@@ -127,4 +146,12 @@ export function createTimerboardApi(client) {
       p_admin_key: adminKey
     })
   });
+}
+
+function isMissingRpcSignature(error) {
+  if (!error) return false;
+  const code = String(error.code || "").toUpperCase();
+  const message = String(error.message || error.details || "");
+  return code === "PGRST202" || code === "42883" ||
+    /could not find.*function|function .* does not exist/i.test(message);
 }

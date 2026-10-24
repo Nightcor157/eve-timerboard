@@ -14,10 +14,11 @@ for (const device of [
   await runBrowserTest(`general route ${device.name}`, async ({ page }) => {
     await page.addInitScript((initialTimers) => {
       localStorage.setItem("eve_timerboard_view_key_main", "view-test-key");
+      window.__routeTimers = initialTimers;
       window.supabase = {
         createClient: () => ({
           rpc: async (name) => {
-            if (name === "get_timers") return { data: initialTimers, error: null };
+            if (name === "get_timers") return { data: window.__routeTimers, error: null };
             if (name === "list_fleets") return { data: [], error: null };
             return { data: [], error: null };
           }
@@ -57,6 +58,20 @@ for (const device of [
     assert.equal(await page.locator(".map-route-node.is-target").count(), 1);
     assert.ok((await page.locator(".map-region-label").allTextContents()).includes("The Forge"));
     assert.deepEqual(await page.locator("#generalRoutePanel [data-filter-summary]").allTextContents(), ["Оборона", "Metenox Moon Drill + Customs Office"]);
+
+    await page.evaluate(() => {
+      const source = window.__routeTimers[0];
+      window.__routeTimers = [...window.__routeTimers, {
+        ...source,
+        id: "timer-auto-refresh",
+        system: "Jita",
+        structure: "Jita IV",
+        updated_at: new Date(Date.parse(source.updated_at) + 1000).toISOString()
+      }];
+      document.querySelector("#refreshBtn").click();
+    });
+    await page.waitForFunction(() => document.querySelectorAll("#routeList .route-list-row").length === 2);
+    assert.ok((await page.locator("#routeList .route-list-system").allTextContents()).includes("Jita"));
 
     if (device.name === "desktop") {
       const map = page.locator("#routeMap");

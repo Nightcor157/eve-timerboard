@@ -11,7 +11,9 @@ await runBrowserTest("fleet commander result controls", async ({ page }) => {
   await page.addInitScript(({ initialTimers, thirdEnd, etaOne, etaTwo }) => {
     localStorage.setItem("eve_timerboard_view_key_main", "view-test-key");
     let timerResult = "";
-    const timers = () => initialTimers.map((timer) => timer.id === "timer-1" ? { ...timer, note: timerResult } : timer);
+    let timerUpdatedAt = initialTimers[0].updated_at;
+    let timerCompletedAt = null;
+    const timers = () => initialTimers.map((timer) => timer.id === "timer-1" ? { ...timer, note: timerResult, updated_at: timerUpdatedAt, completed_at: timerCompletedAt } : timer);
     window.__rpcLog = [];
     window.supabase = {
       createClient: () => ({
@@ -20,15 +22,18 @@ await runBrowserTest("fleet commander result controls", async ({ page }) => {
           if (name === "get_timers") return { data: timers(), error: null };
           if (name === "list_fleets") return { data: [{ fleet_id: "fleet-1", fleet_name: "Флот 1", fleet_color: "#27a7d8" }], error: null };
           if (name === "get_fleet_route") return { data: [{
-            fleet_id: "fleet-1", fleet_name: "Флот 1", fleet_color: "#27a7d8", timer_id: "timer-1", timer_system: "Amarr", object_name: "Athanor", structure: "Amarr VIII", route_order: 1, jump_count: 2, eta_at: etaOne, end_at: initialTimers[0].end_at, result: timerResult,
+            fleet_id: "fleet-1", fleet_name: "Флот 1", fleet_color: "#27a7d8", timer_id: "timer-1", timer_system: "Amarr", object_name: "Athanor", structure: "Amarr VIII", route_order: 1, jump_count: 2, eta_at: etaOne, end_at: initialTimers[0].end_at, result: timerResult, timer_updated_at: timerUpdatedAt,
             route_nodes: [{ id: 30000142, name: "Jita" }, { id: 30000144, name: "Perimeter" }, { id: 30002187, name: "Amarr" }]
           }, {
-            fleet_id: "fleet-1", fleet_name: "Флот 1", fleet_color: "#27a7d8", timer_id: "timer-3", timer_system: "Hedion", object_name: "Metenox Moon Drill", structure: "Hedion I", route_order: 2, jump_count: 1, eta_at: etaTwo, end_at: thirdEnd, result: "",
+            fleet_id: "fleet-1", fleet_name: "Флот 1", fleet_color: "#27a7d8", timer_id: "timer-3", timer_system: "Hedion", object_name: "Metenox Moon Drill", structure: "Hedion I", route_order: 2, jump_count: 1, eta_at: etaTwo, end_at: thirdEnd, result: "", timer_updated_at: initialTimers[1].updated_at,
             route_nodes: [{ id: 30002187, name: "Amarr" }, { id: 30002189, name: "Hedion" }]
           }], error: null };
           if (name === "set_fleet_timer_result") {
+            if (args.p_expected_updated_at !== timerUpdatedAt) return { data: null, error: { message: "timer update conflict", code: "40001" } };
             timerResult = args.p_result;
-            return { data: { id: args.p_timer_id, note: timerResult }, error: null };
+            timerUpdatedAt = new Date(Date.parse(timerUpdatedAt) + 1000).toISOString();
+            timerCompletedAt = timerResult ? timerUpdatedAt : null;
+            return { data: { ...initialTimers[0], id: args.p_timer_id, note: timerResult, updated_at: timerUpdatedAt, completed_at: timerCompletedAt }, error: null };
           }
           return { data: [], error: null };
         }
@@ -71,6 +76,7 @@ await runBrowserTest("fleet commander result controls", async ({ page }) => {
   const lastResultRpc = await page.evaluate(() => window.__rpcLog.filter((item) => item.name === "set_fleet_timer_result").at(-1));
   assert.equal(lastResultRpc.args.p_access_key, "A1B2C3D4E5F60718293A4B5C");
   assert.equal(lastResultRpc.args.p_timer_id, "timer-1");
+  assert.ok(lastResultRpc.args.p_expected_updated_at);
 });
 
 function routeEdges(page) {

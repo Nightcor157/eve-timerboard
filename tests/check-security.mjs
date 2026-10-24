@@ -9,6 +9,15 @@ assert.match(html, /script-src 'self' https:\/\/cdn\.jsdelivr\.net/i);
 assert.match(html, /connect-src 'self' https:\/\/\*\.supabase\.co https:\/\/esi\.evetech\.net/i);
 assert.match(html, /@supabase\/supabase-js@2\.118\.0/);
 assert.doesNotMatch(html, /@supabase\/supabase-js@2(?:["/])/);
+assert.match(html, /integrity="sha384-[A-Za-z0-9+/=]+"/);
+assert.match(html, /crossorigin="anonymous"/);
+
+const app = await readFile(resolve(projectRoot, "js/app.js"), "utf8");
+const routes = await readFile(resolve(projectRoot, "js/routes.js"), "utf8");
+assert.doesNotMatch(app, /localStorage\.(?:getItem|setItem)\(ADMIN_KEY_STORAGE/);
+assert.doesNotMatch(routes, /localStorage\.(?:getItem|setItem)\(FLEET_KEY_PREFIX/);
+assert.match(app, /sessionStorage\.setItem\(ADMIN_KEY_STORAGE/);
+assert.match(routes, /sessionStorage\.setItem\(FLEET_KEY_PREFIX/);
 
 const sql = await readFile(resolve(projectRoot, "supabase/schema.sql"), "utf8");
 assert.doesNotMatch(sql, /\b(?:drop\s+table|truncate)\b/i, "schema.sql contains destructive setup SQL");

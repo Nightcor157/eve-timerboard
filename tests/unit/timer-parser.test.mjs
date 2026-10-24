@@ -39,6 +39,25 @@ test("defaults override every parsed field", () => {
   assert.equal(timer.mode, "Armor");
 });
 
+test("rejects impossible UTC dates instead of normalizing them", () => {
+  assert.throws(
+    () => parseTimerInput("Hakatiz - 7-6\nReinforced until 2026.02.31 25:00:00"),
+    /Некорректная дата:.*2026\.02\.31 25:00:00/
+  );
+  assert.throws(
+    () => parseTimerInput("Hakatiz - 7-6\nReinforced until 2026.04.31 12:00:00"),
+    /Некорректная дата/
+  );
+});
+
+test("accepts leap day only in a leap year", () => {
+  assert.equal(parseTimerInput("Hakatiz - 7-6\nReinforced until 2028.02.29 23:59:59")[0].end_at, "2028-02-29T23:59:59.000Z");
+  assert.throws(
+    () => parseTimerInput("Hakatiz - 7-6\nReinforced until 2027.02.29 23:59:59"),
+    /Некорректная дата/
+  );
+});
+
 function pick(timer) {
   return {
     title: timer.title,

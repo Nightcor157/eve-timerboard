@@ -59,12 +59,14 @@ try {
     "select * from public.patch_timer_admin_fields($1, $2, $3, $4::jsonb, $5::timestamptz)",
     ["main", "admin-test-key", original.id, JSON.stringify({ note: "Защищена" }), patched.rows[0].updated_at]
   );
+  assert.ok(withResult.rows[0].completed_at);
   assert.equal(await resultEventCount(db, original.id), 1);
   const sameResult = await db.query(
     "select * from public.patch_timer_admin_fields($1, $2, $3, $4::jsonb, $5::timestamptz)",
     ["main", "admin-test-key", original.id, JSON.stringify({ note: "Защищена" }), withResult.rows[0].updated_at]
   );
   assert.equal(sameResult.rows[0].note, "Защищена");
+  assert.equal(new Date(sameResult.rows[0].completed_at).toISOString(), new Date(withResult.rows[0].completed_at).toISOString());
   assert.equal(await resultEventCount(db, original.id), 1);
 
   const legacy = await db.query(`
@@ -89,6 +91,24 @@ try {
     /at least 12 characters/i
   );
   await db.query("select public.set_timerboard_view_key($1, $2, $3)", ["main", "admin-test-key", "view-test-key-12"]);
+  const fleetResult = await db.query(
+    "select * from public.set_fleet_timer_result($1, $2, $3, $4::uuid, $5::uuid, $6, $7::timestamptz)",
+    ["main", "view-test-key-12", "admin-test-key", null, original.id, "Уничтожена", sameResult.rows[0].updated_at]
+  );
+  assert.equal(fleetResult.rows[0].note, "Уничтожена");
+  assert.ok(fleetResult.rows[0].completed_at);
+  await assert.rejects(
+    db.query(
+      "select * from public.set_fleet_timer_result($1, $2, $3, $4::uuid, $5::uuid, $6, $7::timestamptz)",
+      ["main", "view-test-key-12", "admin-test-key", null, original.id, "Защищена", sameResult.rows[0].updated_at]
+    ),
+    /timer update conflict/i
+  );
+  assert.equal(await resultEventCount(db, original.id), 2);
+
+  await assertClientRole(db, "anon", countBeforeFailure);
+  await assertClientRole(db, "authenticated", countBeforeFailure);
+
   await assert.rejects(
     db.query("select public.clear_timer_history($1, $2)", ["main", "wrong-admin-key"]),
     /wrong admin key/i
@@ -134,4 +154,34 @@ async function resultEventCount(database, timerId) {
     [timerId]
   );
   return result.rows[0].count;
+}
+
+async function assertClientRole(database, role, expectedTimerCount) {
+  await database.exec(`set role ${role}`);
+  try {
+    await assert.rejects(database.query("select * from public.timers"), /permission denied/i);
+    await assert.rejects(database.query("select * from public.timerboard_settings"), /permission denied/i);
+    await assert.rejects(database.query("select * from public.fleet_profiles"), /permission denied/i);
+    await assert.rejects(database.query("select * from public.timer_result_events"), /permission denied/i);
+    await assert.rejects(
+      database.query("insert into public.timers (board_id, raw_text, end_at) values ('main', 'forbidden', now())"),
+      /permission denied/i
+    );
+    await assert.rejects(
+      database.query("update public.timers set system = 'forbidden' where board_id = 'main'"),
+      /permission denied/i
+    );
+    await assert.rejects(
+      database.query("delete from public.timers where board_id = 'main'"),
+      /permission denied/i
+    );
+    const visible = await database.query("select * from public.get_timers($1, $2)", ["main", "view-test-key-12"]);
+    assert.equal(visible.rows.length, expectedTimerCount);
+    await assert.rejects(
+      database.query("select public.clear_timer_history($1, $2)", ["main", "wrong-admin-key"]),
+      /wrong admin key/i
+    );
+  } finally {
+    await database.exec("reset role");
+  }
 }

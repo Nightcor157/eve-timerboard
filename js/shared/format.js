@@ -59,8 +59,21 @@ export function parseUtcInput(value) {
   const match = String(value || "").trim().match(/^(\d{4})[.-](\d{1,2})[.-](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (!match) return "";
   const [, year, month, day, hour, minute, second = "0"] = match;
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
-  if (Number.isNaN(date.getTime())) return "";
+  return utcPartsToIso(year, month, day, hour, minute, second);
+}
+
+export function utcPartsToIso(year, month, day, hour, minute, second = 0) {
+  const parts = [year, month, day, hour, minute, second].map(Number);
+  if (!parts.every(Number.isInteger)) return "";
+  const [y, m, d, h, min, sec] = parts;
+  if (y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31 || h < 0 || h > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
+    return "";
+  }
+  const date = new Date(Date.UTC(y, m - 1, d, h, min, sec));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d ||
+      date.getUTCHours() !== h || date.getUTCMinutes() !== min || date.getUTCSeconds() !== sec) {
+    return "";
+  }
   return date.toISOString();
 }
 

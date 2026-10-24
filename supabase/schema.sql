@@ -28,32 +28,54 @@ create table if not exists public.timers (
   mode text not null default '',
   end_at timestamptz not null,
   note text not null default '',
+  completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'timers_distance_values_chk'
-      and conrelid = 'public.timers'::regclass
-  ) then
-    alter table public.timers
-      add constraint timers_distance_values_chk
-      check (distance in ('', 'Атака', 'Оборона')) not valid;
-  end if;
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'timers_note_values_chk'
-      and conrelid = 'public.timers'::regclass
-  ) then
-    alter table public.timers
-      add constraint timers_note_values_chk
-      check (note in ('', 'Защищена', 'Уничтожена')) not valid;
-  end if;
-end;
+alter table public.timers
+add column if not exists completed_at timestamptz;
+
+create or replace function public.is_valid_structure_type(p_value text)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select coalesce(p_value, '') in (
+    '', 'Astrahus', 'Fortizar', 'Keepstar',
+    'Raitaru', 'Azbel', 'Sotiyo', 'Athanor', 'Tatara',
+    'Metenox Moon Drill', 'Customs Office', 'IHub', 'TCU', 'POS'
+  );
 $$;
+
+create or replace function public.is_valid_timer_kind(p_value text)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select coalesce(p_value, '') in ('', 'Атака', 'Оборона');
+$$;
+
+create or replace function public.is_valid_timer_result(p_value text)
+returns boolean
+language sql
+immutable
+set search_path = public
+as $$
+  select coalesce(p_value, '') in ('', 'Защищена', 'Уничтожена');
+$$;
+
+alter table public.timers drop constraint if exists timers_distance_values_chk;
+alter table public.timers
+  add constraint timers_distance_values_chk
+  check (public.is_valid_timer_kind(distance)) not valid;
+
+alter table public.timers drop constraint if exists timers_note_values_chk;
+alter table public.timers
+  add constraint timers_note_values_chk
+  check (public.is_valid_timer_result(note)) not valid;
 
 create table if not exists public.fleet_profiles (
   id uuid primary key default gen_random_uuid(),
@@ -130,10 +152,38 @@ begin
 end;
 $$;
 
+create or replace function public.set_timer_completed_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.note in ('Защищена', 'Уничтожена') then
+    if tg_op = 'INSERT' or old.note is distinct from new.note then
+      new.completed_at = now();
+    elsif new.completed_at is null then
+      new.completed_at = greatest(new.end_at, coalesce(old.updated_at, now()));
+    end if;
+  else
+    new.completed_at = null;
+  end if;
+  return new;
+end;
+$$;
+
+update public.timers
+set completed_at = greatest(end_at, updated_at)
+where note in ('Защищена', 'Уничтожена') and completed_at is null;
+
 drop trigger if exists timers_set_updated_at on public.timers;
 create trigger timers_set_updated_at
 before update on public.timers
 for each row execute function public.set_updated_at();
+
+drop trigger if exists timers_set_completed_at on public.timers;
+create trigger timers_set_completed_at
+before insert or update on public.timers
+for each row execute function public.set_timer_completed_at();
 
 drop trigger if exists timerboard_settings_set_updated_at on public.timerboard_settings;
 create trigger timerboard_settings_set_updated_at
@@ -389,22 +439,17 @@ begin
     end if;
 
     v_object_name := coalesce(v_item ->> 'object_name', '');
-    if v_object_name not in (
-      '', 'Astrahus', 'Fortizar', 'Keepstar',
-      'Raitaru', 'Azbel', 'Sotiyo',
-      'Athanor', 'Tatara', 'Metenox Moon Drill',
-      'Customs Office', 'IHub', 'TCU', 'POS'
-    ) then
+    if not public.is_valid_structure_type(v_object_name) then
       raise exception 'invalid structure type at item %', v_index;
     end if;
 
     v_timer_kind := coalesce(v_item ->> 'distance', '');
-    if v_timer_kind not in ('', 'Атака', 'Оборона') then
+    if not public.is_valid_timer_kind(v_timer_kind) then
       raise exception 'invalid timer kind at item %', v_index;
     end if;
 
     v_note := coalesce(v_item ->> 'note', '');
-    if v_note not in ('', 'Защищена', 'Уничтожена') then
+    if not public.is_valid_timer_result(v_note) then
       raise exception 'invalid timer result at item %', v_index;
     end if;
   end loop;
@@ -475,26 +520,21 @@ begin
 
   if p_changes ? 'object_name' then
     v_object_name := coalesce(p_changes ->> 'object_name', '');
-    if v_object_name not in (
-      '', 'Astrahus', 'Fortizar', 'Keepstar',
-      'Raitaru', 'Azbel', 'Sotiyo',
-      'Athanor', 'Tatara', 'Metenox Moon Drill',
-      'Customs Office', 'IHub', 'TCU', 'POS'
-    ) then
+    if not public.is_valid_structure_type(v_object_name) then
       raise exception 'invalid structure type';
     end if;
   end if;
 
   if p_changes ? 'distance' then
     v_timer_kind := coalesce(p_changes ->> 'distance', '');
-    if v_timer_kind not in ('', 'Атака', 'Оборона') then
+    if not public.is_valid_timer_kind(v_timer_kind) then
       raise exception 'invalid timer kind';
     end if;
   end if;
 
   if p_changes ? 'note' then
     v_note := coalesce(p_changes ->> 'note', '');
-    if v_note not in ('', 'Защищена', 'Уничтожена') then
+    if not public.is_valid_timer_result(v_note) then
       raise exception 'invalid timer result';
     end if;
   end if;
@@ -995,6 +1035,7 @@ $$;
 
 -- Старую сигнатуру удаляем: маршрут флота теперь требует также ключ просмотра.
 drop function if exists public.get_fleet_route(text, uuid, text);
+drop function if exists public.get_fleet_route(text, text, uuid, text);
 
 create or replace function public.get_fleet_route(
   p_board_id text,
@@ -1023,7 +1064,8 @@ returns table (
   timer_kind text,
   mode text,
   end_at timestamptz,
-  result text
+  result text,
+  timer_updated_at timestamptz
 )
 language plpgsql
 security definer
@@ -1038,7 +1080,7 @@ begin
     f.id, f.name, f.color, f.current_system, f.seconds_per_jump,
     f.service_minutes, a.id, t.id, a.route_order, a.jump_count,
     a.eta_at, a.route_nodes, t.system, t.object_name, t.structure,
-    t.title, t.owner, t.distance, t.mode, t.end_at, t.note
+    t.title, t.owner, t.distance, t.mode, t.end_at, t.note, t.updated_at
   from public.fleet_assignments as a
   join public.fleet_profiles as f on f.id = a.fleet_id
   join public.timers as t on t.id = a.timer_id
@@ -1046,6 +1088,8 @@ begin
   order by a.route_order;
 end;
 $$;
+
+drop function if exists public.get_all_fleet_routes(text, text);
 
 create or replace function public.get_all_fleet_routes(
   p_board_id text,
@@ -1072,7 +1116,8 @@ returns table (
   timer_kind text,
   mode text,
   end_at timestamptz,
-  result text
+  result text,
+  timer_updated_at timestamptz
 )
 language plpgsql
 security definer
@@ -1086,7 +1131,7 @@ begin
     f.id, f.name, f.color, f.current_system, f.seconds_per_jump,
     f.service_minutes, a.id, t.id, a.route_order, a.jump_count,
     a.eta_at, a.route_nodes, t.system, t.object_name, t.structure,
-    t.title, t.owner, t.distance, t.mode, t.end_at, t.note
+    t.title, t.owner, t.distance, t.mode, t.end_at, t.note, t.updated_at
   from public.fleet_assignments as a
   join public.fleet_profiles as f on f.id = a.fleet_id
   join public.timers as t on t.id = a.timer_id
@@ -1097,6 +1142,7 @@ $$;
 
 -- Старую сигнатуру удаляем: командир должен иметь и доступ к доске, и ключ флота.
 drop function if exists public.set_fleet_timer_result(text, text, uuid, uuid, text);
+drop function if exists public.set_fleet_timer_result(text, text, text, uuid, uuid, text);
 
 create or replace function public.set_fleet_timer_result(
   p_board_id text,
@@ -1104,7 +1150,8 @@ create or replace function public.set_fleet_timer_result(
   p_access_key text,
   p_fleet_id uuid,
   p_timer_id uuid,
-  p_result text
+  p_result text,
+  p_expected_updated_at timestamptz
 )
 returns public.timers
 language plpgsql
@@ -1119,8 +1166,12 @@ declare
 begin
   perform public.assert_timerboard_viewer(trim(p_board_id), p_view_key);
 
-  if v_result not in ('', 'Защищена', 'Уничтожена') then
+  if not public.is_valid_timer_result(v_result) then
     raise exception 'invalid timer result';
+  end if;
+
+  if p_expected_updated_at is null then
+    raise exception 'expected timer updated_at is required';
   end if;
 
   if p_fleet_id is null then
@@ -1141,16 +1192,30 @@ begin
 
   select t.note into v_previous
   from public.timers as t
-  where t.board_id = trim(p_board_id) and t.id = p_timer_id;
+  where t.board_id = trim(p_board_id)
+    and t.id = p_timer_id
+    and t.updated_at = p_expected_updated_at;
 
   if not found then
+    if exists (
+      select 1 from public.timers as t
+      where t.board_id = trim(p_board_id) and t.id = p_timer_id
+    ) then
+      raise exception 'timer update conflict' using errcode = '40001';
+    end if;
     raise exception 'timer not found';
   end if;
 
   update public.timers
   set note = v_result
-  where board_id = trim(p_board_id) and id = p_timer_id
+  where board_id = trim(p_board_id)
+    and id = p_timer_id
+    and updated_at = p_expected_updated_at
   returning * into v_timer;
+
+  if v_timer.id is null then
+    raise exception 'timer update conflict' using errcode = '40001';
+  end if;
 
   if coalesce(v_previous, '') is distinct from v_result then
     insert into public.timer_result_events (
@@ -1228,7 +1293,7 @@ grant execute on function public.get_fleet_route(text, text, uuid, text)
 to anon, authenticated;
 grant execute on function public.get_all_fleet_routes(text, text)
 to anon, authenticated;
-grant execute on function public.set_fleet_timer_result(text, text, text, uuid, uuid, text)
+grant execute on function public.set_fleet_timer_result(text, text, text, uuid, uuid, text, timestamptz)
 to anon, authenticated;
 
 -- После успешного выполнения схемы запусти отдельно, заменив ключ:

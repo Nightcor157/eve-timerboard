@@ -19,5 +19,6 @@ export const APP_EVENTS = Object.freeze({
   REQUEST_VIEW_ACCESS: "request-view-access",
   FLEET_BOARD_ACCESS: "fleet-board-access",
   ROUTE_RESULT_UPDATED: "route-result-updated",
-  BOARD_RESULT_UPDATED: "board-result-updated"
+  BOARD_RESULT_UPDATED: "board-result-updated",
+  TIMERS_REFRESHED: "timers-refreshed"
 });

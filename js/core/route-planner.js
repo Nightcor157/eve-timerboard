@@ -175,7 +175,14 @@ export function compareRouteOptions(a, b) {
 }
 
 export function comparePlanMetrics(a, b) {
-  for (const key of ["lateCount", "totalLatenessMs", "totalJumps", "workloadSpreadMs"]) {
+  for (const key of [
+    "lateCount",
+    "totalLatenessMs",
+    "idleFleetCount",
+    "workloadSpreadMs",
+    "assignmentSpread",
+    "totalJumps"
+  ]) {
     const difference = Number(a[key] || 0) - Number(b[key] || 0);
     if (difference) return difference;
   }
@@ -215,6 +222,7 @@ function sequencesFromAssignments(fleets, targets, assignments) {
 async function evaluateSequences(sequences, context) {
   const assignments = [];
   const workloads = [];
+  const assignmentCounts = [];
   let lateCount = 0;
   let totalLatenessMs = 0;
   let totalJumps = 0;
@@ -251,6 +259,7 @@ async function evaluateSequences(sequences, context) {
       currentSystemId = targetSystem.id;
     }
     workloads.push(workloadMs);
+    assignmentCounts.push(timers.length);
   }
 
   return {
@@ -260,7 +269,11 @@ async function evaluateSequences(sequences, context) {
       lateCount,
       totalLatenessMs,
       totalJumps,
-      workloadSpreadMs: workloads.length ? Math.max(...workloads) - Math.min(...workloads) : 0
+      idleFleetCount: assignmentCounts.filter((count) => count === 0).length,
+      workloadSpreadMs: workloads.length ? Math.max(...workloads) - Math.min(...workloads) : 0,
+      assignmentSpread: assignmentCounts.length
+        ? Math.max(...assignmentCounts) - Math.min(...assignmentCounts)
+        : 0
     }
   };
 }

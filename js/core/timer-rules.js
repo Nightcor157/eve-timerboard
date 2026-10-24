@@ -7,8 +7,11 @@ export function getTimerState(timer, now = Date.now()) {
   const result = normalizeStructureResult(timer.note);
 
   if (result) {
-    const updatedAtMs = new Date(timer.updated_at).getTime();
-    const completedAtMs = Number.isFinite(updatedAtMs) ? Math.max(endAtMs, updatedAtMs) : endAtMs;
+    const storedCompletedAtMs = new Date(timer.completed_at).getTime();
+    const legacyUpdatedAtMs = new Date(timer.updated_at).getTime();
+    const completedAtMs = Number.isFinite(storedCompletedAtMs)
+      ? storedCompletedAtMs
+      : Number.isFinite(legacyUpdatedAtMs) ? Math.max(endAtMs, legacyUpdatedAtMs) : endAtMs;
     return completedTimerState(now, completedAtMs);
   }
 

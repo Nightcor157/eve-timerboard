@@ -21,14 +21,17 @@ test("uses structure-specific post timer windows", () => {
 });
 
 test("explicit result completes a timer immediately", () => {
+  const completedAt = now - 2 * 60 * 60 * 1000;
   const state = getTimerState({
     object_name: "Customs Office",
     end_at: new Date(now + 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(now - 60 * 1000).toISOString(),
+    completed_at: new Date(completedAt).toISOString(),
+    updated_at: new Date(now).toISOString(),
     note: "Защищена"
   }, now);
   assert.equal(state.isCompleted, true);
   assert.equal(state.status.label, "Завершён");
+  assert.equal(state.completedAgeMs, 2 * 60 * 60 * 1000);
 });
 
 test("filters completed timers by 12 and 24 hour windows", () => {
