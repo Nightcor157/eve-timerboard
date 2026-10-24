@@ -1660,7 +1660,6 @@
         const from = positions.get(Number(route.nodes[index - 1].id));
         const to = positions.get(Number(route.nodes[index].id));
         if (!from || !to) continue;
-        routeEdges.push(`<line class="route-edge-underlay" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>`);
         routeEdges.push(`<line class="route-edge" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}"></line>`);
       }
     });
@@ -1969,7 +1968,14 @@
     els.routeMap.style.setProperty("--route-label-font-size", `${13 * labelGrowth * viewportCompensation / state.mapZoom}px`);
     els.routeMap.style.setProperty("--route-meta-font-size", `${11 * labelGrowth * viewportCompensation / state.mapZoom}px`);
     els.routeMap.style.setProperty("--route-label-stroke-width", `${4 * viewportCompensation / state.mapZoom}px`);
-    els.routeMap.style.setProperty("--route-marker-scale", String(markerGrowth * viewportCompensation / state.mapZoom));
+    const markerScale = markerGrowth * viewportCompensation / state.mapZoom;
+    els.routeMap.style.setProperty("--route-marker-scale", String(markerScale));
+    els.routeMap.style.setProperty("--route-edge-stroke-width", `${4 * markerScale}px`);
+    els.routeMap.style.setProperty("--context-edge-stroke-width", `${1.05 * markerScale}px`);
+    els.routeMap.style.setProperty("--region-edge-dasharray", `${4 * markerScale}px ${4 * markerScale}px`);
+    els.routeMap.style.setProperty("--route-label-translate-y", `${12 * (1 - markerScale)}px`);
+    els.routeMap.style.setProperty("--route-emphasis-label-translate-y", `${12 - 20 * markerScale}px`);
+    els.routeMap.style.setProperty("--route-meta-translate-y", `${22 * (markerScale - 1)}px`);
     els.routeMap.classList.toggle("is-zoomed", state.mapZoom >= 1.5);
     els.routeZoomOutBtn.disabled = state.mapZoom <= MAP_MIN_ZOOM;
     els.routeZoomInBtn.disabled = state.mapZoom >= MAP_MAX_ZOOM;

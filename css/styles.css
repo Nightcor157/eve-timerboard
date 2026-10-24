@@ -1059,13 +1059,13 @@ input.system-autocomplete.is-invalid {
 
 .map-context-edges line {
   stroke: #355564;
-  stroke-width: 1.05;
+  stroke-width: var(--context-edge-stroke-width, 1.05px);
   opacity: 0.52;
 }
 
 .map-context-edges line.is-region-link {
   stroke: #8b6d37;
-  stroke-dasharray: 4 4;
+  stroke-dasharray: var(--region-edge-dasharray, 4px 4px);
   opacity: 0.72;
 }
 
@@ -1089,20 +1089,13 @@ input.system-autocomplete.is-invalid {
   opacity: 1;
 }
 
-.map-route-edges .route-edge-underlay {
-  stroke: #041019;
-  stroke-width: 8;
-  stroke-linecap: round;
-  opacity: 0.88;
-}
-
 .map-route-edges .route-edge {
-  stroke-width: 4;
+  stroke-width: var(--route-edge-stroke-width, 4px);
   opacity: 0.95;
 }
 
 .map-route-node .route-core {
-  fill: #0a1d29;
+  fill: var(--route-color, #27a7d8);
   stroke: var(--route-color, #27a7d8);
   stroke-width: 2.5;
 }
@@ -1138,6 +1131,16 @@ input.system-autocomplete.is-invalid {
   fill: #8ca8b2;
   font-size: var(--route-meta-font-size, 11px);
   font-weight: 600;
+  transform: translateY(var(--route-meta-translate-y, 0));
+}
+
+.map-route-node .route-system-label {
+  transform: translateY(var(--route-label-translate-y, 0));
+}
+
+.map-route-node.is-start .route-system-label,
+.map-route-node.is-target .route-system-label {
+  transform: translateY(var(--route-emphasis-label-translate-y, 0));
 }
 
 .map-route-node .is-detail-label {
