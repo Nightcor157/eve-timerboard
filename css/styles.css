@@ -970,6 +970,8 @@ input.system-autocomplete.is-invalid {
   position: relative;
   width: 100%;
   height: clamp(28rem, 58vh, 46rem);
+  min-height: 20rem;
+  max-height: 75rem;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
@@ -980,6 +982,35 @@ input.system-autocomplete.is-invalid {
   background-size: 32px 32px;
   scrollbar-color: #42677a #071722;
   overscroll-behavior: contain;
+}
+
+.route-map-resize-handle {
+  display: grid;
+  width: 100%;
+  height: 1rem;
+  place-items: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.route-map-resize-handle span {
+  width: 3.4rem;
+  height: 3px;
+  border-radius: 2px;
+  background: #365668;
+  transition: width 0.12s ease, background 0.12s ease;
+}
+
+.route-map-resize-handle:hover span,
+.route-map-resize-handle:focus-visible span,
+.route-map-resize-handle.is-resizing span {
+  width: 5rem;
+  background: #5d8495;
+}
+
+.route-map-resize-handle:focus-visible {
+  outline: 1px solid #52788a;
+  outline-offset: -2px;
 }
 
 .route-map.has-map {
@@ -1050,21 +1081,6 @@ input.system-autocomplete.is-invalid {
   opacity: 1;
 }
 
-.map-context-label {
-  display: none;
-  fill: #91aab3;
-  font-size: 9px;
-  font-weight: 600;
-  paint-order: stroke;
-  stroke: #06131c;
-  stroke-width: 3px;
-  stroke-linejoin: round;
-}
-
-.route-map.is-context-labeled .map-context-label {
-  display: block;
-}
-
 .map-route-edges .route-edge-underlay {
   stroke: #041019;
   stroke-width: 8;
@@ -1102,17 +1118,17 @@ input.system-autocomplete.is-invalid {
 
 .map-route-node text {
   fill: #b9cbd1;
-  font-size: 13px;
+  font-size: var(--route-label-font-size, 13px);
   font-weight: 650;
   paint-order: stroke;
   stroke: #06131c;
-  stroke-width: 4px;
+  stroke-width: var(--route-label-stroke-width, 4px);
   stroke-linejoin: round;
 }
 
 .map-route-node .route-node-meta {
   fill: #8ca8b2;
-  font-size: 11px;
+  font-size: var(--route-meta-font-size, 11px);
   font-weight: 600;
 }
 
@@ -1145,17 +1161,17 @@ input.system-autocomplete.is-invalid {
 
 .route-node text {
   fill: #b2c7ce;
-  font-size: 13px;
+  font-size: var(--route-label-font-size, 13px);
   font-weight: 600;
   paint-order: stroke;
   stroke: #07131d;
-  stroke-width: 3px;
+  stroke-width: var(--route-label-stroke-width, 3px);
   stroke-linejoin: round;
 }
 
 .route-node .route-node-meta {
   fill: #829eaa;
-  font-size: 11px;
+  font-size: var(--route-meta-font-size, 11px);
   font-weight: 500;
 }
 

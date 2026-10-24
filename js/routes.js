@@ -9,6 +9,7 @@
   const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
   const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
   const GENERAL_SERVICE_KEY = `eve_timerboard_route_service_${BOARD_ID}`;
+  const MAP_HEIGHT_KEY = `eve_timerboard_route_map_height_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
   const MAP_MIN_ZOOM = 1;
   const MAP_MAX_ZOOM = 4;
@@ -50,6 +51,7 @@
     mapZoom: 1,
     mapSignature: "",
     mapDrag: null,
+    mapResize: null,
     mapViewByMode: {
       general: { signature: "", zoom: 1, scrollLeft: 0, scrollTop: 0 },
       fleet: { signature: "", zoom: 1, scrollLeft: 0, scrollTop: 0 }
@@ -102,6 +104,7 @@
     routeZoomResetBtn: document.getElementById("routeZoomResetBtn"),
     routeZoomInBtn: document.getElementById("routeZoomInBtn"),
     routeMap: document.getElementById("routeMap"),
+    routeMapResizeHandle: document.getElementById("routeMapResizeHandle"),
     routeLegend: document.getElementById("routeLegend"),
     routeList: document.getElementById("routeList"),
     adminKey: document.getElementById("adminKey"),
@@ -114,6 +117,7 @@
   function init() {
     els.generalOriginSystem.value = localStorage.getItem(GENERAL_ORIGIN_KEY) || "";
     els.generalServiceMinutes.value = localStorage.getItem(GENERAL_SERVICE_KEY) || "10";
+    restoreRouteMapHeight();
     loadSystemCatalog().catch(() => {});
     bindSystemAutocomplete(els.generalOriginSystem);
     bindSystemAutocomplete(els.newFleetSystem);
@@ -155,6 +159,11 @@
     els.routeMap.addEventListener("pointerup", stopRouteMapPan);
     els.routeMap.addEventListener("pointercancel", stopRouteMapPan);
     els.routeMap.addEventListener("scroll", saveRouteViewport, { passive: true });
+    els.routeMapResizeHandle.addEventListener("pointerdown", startRouteMapResize);
+    els.routeMapResizeHandle.addEventListener("pointermove", moveRouteMapResize);
+    els.routeMapResizeHandle.addEventListener("pointerup", stopRouteMapResize);
+    els.routeMapResizeHandle.addEventListener("pointercancel", stopRouteMapResize);
+    els.routeMapResizeHandle.addEventListener("keydown", handleRouteMapResizeKeydown);
 
     els.createFleetBtn.addEventListener("click", createFleet);
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
@@ -1662,7 +1671,6 @@
         const point = positions.get(system.id);
         return `<g class="map-context-node" data-region-id="${system.regionId}" transform="translate(${point.x} ${point.y})">
           <circle r="3.5" fill="${securityColor(system.security)}"></circle>
-          <text class="map-context-label" x="7" y="-6">${escapeHtml(system.name)}</text>
           <title>${escapeHtml(system.name)} (${formatSecurity(system.security)})</title>
         </g>`;
       });
@@ -1886,6 +1894,56 @@
     saveRouteViewport();
   }
 
+  function restoreRouteMapHeight() {
+    const savedHeight = Number(localStorage.getItem(MAP_HEIGHT_KEY));
+    if (Number.isFinite(savedHeight) && savedHeight > 0) {
+      els.routeMap.style.height = `${clampRouteMapHeight(savedHeight)}px`;
+    }
+  }
+
+  function startRouteMapResize(event) {
+    if (event.button !== 0) return;
+    state.mapResize = {
+      pointerId: event.pointerId,
+      y: event.clientY,
+      height: els.routeMap.getBoundingClientRect().height
+    };
+    els.routeMapResizeHandle.classList.add("is-resizing");
+    els.routeMapResizeHandle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveRouteMapResize(event) {
+    if (!state.mapResize || state.mapResize.pointerId !== event.pointerId) return;
+    const height = clampRouteMapHeight(state.mapResize.height + event.clientY - state.mapResize.y);
+    els.routeMap.style.height = `${height}px`;
+    event.preventDefault();
+  }
+
+  function stopRouteMapResize(event) {
+    if (!state.mapResize || state.mapResize.pointerId !== event.pointerId) return;
+    if (els.routeMapResizeHandle.hasPointerCapture(event.pointerId)) {
+      els.routeMapResizeHandle.releasePointerCapture(event.pointerId);
+    }
+    state.mapResize = null;
+    els.routeMapResizeHandle.classList.remove("is-resizing");
+    localStorage.setItem(MAP_HEIGHT_KEY, String(Math.round(els.routeMap.getBoundingClientRect().height)));
+  }
+
+  function handleRouteMapResizeKeydown(event) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    const step = event.shiftKey ? 100 : 40;
+    const height = clampRouteMapHeight(els.routeMap.getBoundingClientRect().height + direction * step);
+    els.routeMap.style.height = `${height}px`;
+    localStorage.setItem(MAP_HEIGHT_KEY, String(Math.round(height)));
+    event.preventDefault();
+  }
+
+  function clampRouteMapHeight(value) {
+    return Math.max(320, Math.min(1200, Math.round(Number(value) || 0)));
+  }
+
   function resetRouteZoom() {
     state.mapZoom = MAP_MIN_ZOOM;
     applyRouteZoom();
@@ -1899,8 +1957,11 @@
       stage.style.width = `${state.mapZoom * 100}%`;
       stage.style.height = `${state.mapZoom * 100}%`;
     }
+    const labelGrowth = 1 + Math.min(0.36, Math.max(0, state.mapZoom - 1) * 0.12);
+    els.routeMap.style.setProperty("--route-label-font-size", `${13 * labelGrowth / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--route-meta-font-size", `${11 * labelGrowth / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--route-label-stroke-width", `${4 / state.mapZoom}px`);
     els.routeMap.classList.toggle("is-zoomed", state.mapZoom >= 1.5);
-    els.routeMap.classList.toggle("is-context-labeled", state.mapZoom >= 2.25);
     els.routeZoomOutBtn.disabled = state.mapZoom <= MAP_MIN_ZOOM;
     els.routeZoomInBtn.disabled = state.mapZoom >= MAP_MAX_ZOOM;
   }
@@ -1937,7 +1998,7 @@
     state.mapSignature = "";
     state.mapZoom = MAP_MIN_ZOOM;
     state.mapDrag = null;
-    els.routeMap.classList.remove("has-map", "is-panning", "is-zoomed", "is-context-labeled");
+    els.routeMap.classList.remove("has-map", "is-panning", "is-zoomed");
     els.routeMap.innerHTML = `<div class="route-map-empty">${escapeHtml(message)}</div>`;
     els.routeLegend.innerHTML = "";
     els.routeList.innerHTML = "";
