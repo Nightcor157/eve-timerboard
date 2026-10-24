@@ -736,8 +736,12 @@ begin
 end;
 $$;
 
+-- Старую сигнатуру удаляем: маршрут флота теперь требует также ключ просмотра.
+drop function if exists public.get_fleet_route(text, uuid, text);
+
 create or replace function public.get_fleet_route(
   p_board_id text,
+  p_view_key text,
   p_fleet_id uuid,
   p_fleet_key text
 )
@@ -769,6 +773,7 @@ security definer
 set search_path = public, extensions
 as $$
 begin
+  perform public.assert_timerboard_viewer(trim(p_board_id), p_view_key);
   perform public.assert_fleet_access(trim(p_board_id), p_fleet_id, p_fleet_key);
 
   return query
@@ -833,8 +838,12 @@ begin
 end;
 $$;
 
+-- Старую сигнатуру удаляем: командир должен иметь и доступ к доске, и ключ флота.
+drop function if exists public.set_fleet_timer_result(text, text, uuid, uuid, text);
+
 create or replace function public.set_fleet_timer_result(
   p_board_id text,
+  p_view_key text,
   p_access_key text,
   p_fleet_id uuid,
   p_timer_id uuid,
@@ -851,6 +860,8 @@ declare
   v_result text := coalesce(p_result, '');
   v_actor text;
 begin
+  perform public.assert_timerboard_viewer(trim(p_board_id), p_view_key);
+
   if v_result not in ('', 'Защищена', 'Уничтожена') then
     raise exception 'invalid timer result';
   end if;
@@ -941,11 +952,11 @@ grant execute on function public.delete_fleet(text, text, uuid)
 to anon, authenticated;
 grant execute on function public.replace_fleet_assignments(text, text, jsonb)
 to anon, authenticated;
-grant execute on function public.get_fleet_route(text, uuid, text)
+grant execute on function public.get_fleet_route(text, text, uuid, text)
 to anon, authenticated;
 grant execute on function public.get_all_fleet_routes(text, text)
 to anon, authenticated;
-grant execute on function public.set_fleet_timer_result(text, text, uuid, uuid, text)
+grant execute on function public.set_fleet_timer_result(text, text, text, uuid, uuid, text)
 to anon, authenticated;
 
 -- После успешного выполнения схемы запусти отдельно, заменив ключ:

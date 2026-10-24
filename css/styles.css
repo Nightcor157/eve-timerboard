@@ -99,6 +99,14 @@ textarea::placeholder {
   background: #102b3c;
 }
 
+.nav-tab.is-locked,
+.nav-tab.is-locked:hover {
+  color: #657f8a;
+  background: transparent;
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
 .view-mode-btn {
   background: transparent;
   border-color: var(--border);

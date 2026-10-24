@@ -60,6 +60,7 @@
   let fleetBoardAccess = null;
   let adminViewEnabled = false;
   let adminKeyValidated = false;
+  let viewAccessGranted = false;
 
   const els = {
     configWarning: document.getElementById("configWarning"),
@@ -179,6 +180,11 @@
       if (event.key === "Enter") unlockView();
     });
     window.addEventListener("eve-timerboard:fleet-board-access", applyFleetBoardAccess);
+    window.addEventListener("eve-timerboard:request-view-access", () => {
+      if (adminViewEnabled) return;
+      showViewGate("Введите ключ просмотра, чтобы открыть маршруты.", false);
+      window.setTimeout(() => els.viewKey.focus(), 0);
+    });
 
     applyAdminView(false, false);
     loadTimers();
@@ -309,6 +315,7 @@
       if (db) {
         const viewKey = getReadKey();
         if (!viewKey) {
+          setViewAccessGranted(false);
           timers = [];
           renderTimers();
           showViewGate("Введите ключ просмотра, чтобы открыть доску.", false);
@@ -321,15 +328,18 @@
         });
 
         if (error) throw error;
+        setViewAccessGranted(true);
         hideViewGate();
         timers = (data || []).map(normalizeTimer);
       } else {
+        setViewAccessGranted(true);
         timers = readLocalTimers().map(normalizeTimer);
       }
       renderTimers();
     } catch (err) {
       const message = friendlyDbError(err);
       if (/ключ просмотра|get_timers|permission|28000|wrong/i.test(message)) {
+        setViewAccessGranted(false);
         timers = [];
         renderTimers();
         showViewGate(message, true);
@@ -337,6 +347,14 @@
       }
       setStatus(`Ошибка загрузки: ${message}`, true);
     }
+  }
+
+  function setViewAccessGranted(granted) {
+    viewAccessGranted = Boolean(granted);
+    document.body.classList.toggle("has-view-access", viewAccessGranted);
+    window.dispatchEvent(new CustomEvent("eve-timerboard:view-access-changed", {
+      detail: { granted: viewAccessGranted }
+    }));
   }
 
   function getReadKey() {
@@ -856,6 +874,7 @@
     try {
       const { error } = await db.rpc("set_fleet_timer_result", {
         p_board_id: BOARD_ID,
+        p_view_key: getReadKey(),
         p_access_key: fleetBoardAccess.fleetKey,
         p_fleet_id: fleetBoardAccess.fleetId,
         p_timer_id: timer.id,

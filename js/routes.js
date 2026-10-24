@@ -9,6 +9,7 @@
   const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
   const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
+  let viewAccessGranted = document.body.classList.contains("has-view-access");
 
   const hasSupabaseConfig = Boolean(
     CONFIG.supabaseUrl &&
@@ -99,7 +100,7 @@
     bindSystemAutocomplete(els.newFleetSystem);
 
     els.boardTab.addEventListener("click", () => showMainView("board"));
-    els.routesTab.addEventListener("click", () => showMainView("routes"));
+    els.routesTab.addEventListener("click", handleRoutesTabClick);
     window.addEventListener("hashchange", applyHashView);
 
     els.generalMapModeBtn.addEventListener("click", () => setMapMode("general"));
@@ -117,8 +118,14 @@
     });
     window.addEventListener("eve-timerboard:admin-view-changed", (event) => {
       adminViewEnabled = Boolean(event.detail && event.detail.enabled);
+      if (adminViewEnabled) viewAccessGranted = true;
+      updateRoutesAccess();
       setMapMode(state.mapMode);
       if (!els.routesView.hidden) loadRouteData();
+    });
+    window.addEventListener("eve-timerboard:view-access-changed", (event) => {
+      viewAccessGranted = Boolean(event.detail && event.detail.granted);
+      updateRoutesAccess();
     });
     els.routeZoomOutBtn.addEventListener("click", () => changeRouteZoom(-0.25));
     els.routeZoomResetBtn.addEventListener("click", resetRouteZoom);
@@ -136,6 +143,7 @@
     }
 
     setMapMode("general");
+    updateRoutesAccess();
     applyHashView();
   }
 
@@ -143,14 +151,50 @@
     showMainView(window.location.hash === "#routes" ? "routes" : "board", false);
   }
 
+  function handleRoutesTabClick(event) {
+    if (!canOpenRoutes()) {
+      event.preventDefault();
+      showMainView("board");
+      window.dispatchEvent(new CustomEvent("eve-timerboard:request-view-access"));
+      return;
+    }
+    showMainView("routes");
+  }
+
   function showMainView(view, updateHash = true) {
-    const showRoutes = view === "routes";
+    const requestedRoutes = view === "routes";
+    const showRoutes = requestedRoutes && canOpenRoutes();
     els.boardView.hidden = showRoutes;
     els.routesView.hidden = !showRoutes;
     els.boardTab.classList.toggle("is-active", !showRoutes);
     els.routesTab.classList.toggle("is-active", showRoutes);
-    if (updateHash) history.replaceState(null, "", showRoutes ? "#routes" : "#board");
+    if (updateHash || requestedRoutes && !showRoutes) {
+      history.replaceState(null, "", showRoutes ? "#routes" : "#board");
+    }
     if (showRoutes) loadRouteData();
+  }
+
+  function canOpenRoutes() {
+    return viewAccessGranted || adminViewEnabled;
+  }
+
+  function updateRoutesAccess() {
+    const unlocked = canOpenRoutes();
+    els.routesTab.classList.toggle("is-locked", !unlocked);
+    els.routesTab.setAttribute("aria-disabled", String(!unlocked));
+    els.routesTab.title = unlocked ? "" : "Сначала введите ключ просмотра";
+    if (unlocked || els.routesView.hidden) return;
+
+    state.fleets = [];
+    state.adminFleets = [];
+    state.routeRows = [];
+    state.selectedFleetKey = "";
+    els.fleetLoginKey.value = "";
+    els.fleetLoginSelect.innerHTML = '<option value="">Выберите флот</option>';
+    els.fleetProfilesList.innerHTML = "";
+    publishFleetBoardAccess("", "", []);
+    clearRouteWorkspace("Введите ключ просмотра, чтобы открыть маршруты.");
+    showMainView("board");
   }
 
   function setMapMode(mode) {
@@ -731,6 +775,7 @@
     try {
       const { data, error } = await db.rpc("get_fleet_route", {
         p_board_id: BOARD_ID,
+        p_view_key: getReadKey(),
         p_fleet_id: fleetId,
         p_fleet_key: fleetKey
       });
