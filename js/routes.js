@@ -32,6 +32,7 @@
     selectedFleetId: "",
     selectedFleetKey: "",
     boardAccessFleetId: "",
+    generalPlan: null,
     routeCache: new Map(),
     nameCache: new Map(),
     idNameCache: new Map(),
@@ -75,6 +76,7 @@
     newFleetServiceMinutes: document.getElementById("newFleetServiceMinutes"),
     createFleetBtn: document.getElementById("createFleetBtn"),
     generatedFleetKey: document.getElementById("generatedFleetKey"),
+    generatedFleetKeyLabel: document.getElementById("generatedFleetKeyLabel"),
     generatedFleetKeyValue: document.getElementById("generatedFleetKeyValue"),
     copyFleetKeyBtn: document.getElementById("copyFleetKeyBtn"),
     fleetProfilesList: document.getElementById("fleetProfilesList"),
@@ -192,6 +194,7 @@
     state.fleets = [];
     state.adminFleets = [];
     state.routeRows = [];
+    state.generalPlan = null;
     state.selectedFleetKey = "";
     els.fleetLoginKey.value = "";
     els.fleetLoginSelect.innerHTML = '<option value="">Выберите флот</option>';
@@ -209,12 +212,19 @@
     els.generalRoutePanel.hidden = !general;
     els.fleetAccessPanel.hidden = general || adminViewEnabled;
     els.fleetAdminPanel.hidden = general || !adminViewEnabled;
-    clearRouteWorkspace(general
-      ? "Укажите стартовую систему выше и нажмите «Рассчитать»."
-      : adminViewEnabled
-        ? "Создай флоты или загрузи сохранённые маршруты."
-        : "Выбери флот и введи его ключ.");
-    if (!general) loadRouteData();
+    if (general) {
+      if (state.generalPlan) {
+        renderGeneralPlan(state.generalPlan);
+      } else {
+        clearRouteWorkspace("Укажите стартовую систему выше и нажмите «Рассчитать».");
+      }
+      return;
+    }
+
+    clearRouteWorkspace(adminViewEnabled
+      ? "Создай флоты или загрузи сохранённые маршруты."
+      : "Выбери флот и введи его ключ.");
+    loadRouteData();
   }
 
   async function loadRouteData() {
@@ -327,9 +337,9 @@
             <span class="checkbox-box" aria-hidden="true"></span>
             <span>активен</span>
           </label>
-          <div class="fleet-key-hint">Ключ: ••••${escapeHtml(fleet.key_hint || "")}</div>
+          <div class="fleet-key-hint" title="Полный ключ не хранится">Ключ оканчивается на: ${escapeHtml(fleet.key_hint || "—")}</div>
           <div class="fleet-profile-actions">
-            <button data-action="save" class="secondary-btn" type="button">Сохранить</button>
+            <button data-action="save" class="secondary-btn" type="button">Сохранить профиль</button>
             <button data-action="rotate" class="ghost-btn" type="button">Новый ключ</button>
             <button data-action="delete" class="danger-btn" type="button">Удалить</button>
           </div>
@@ -371,8 +381,8 @@
       if (created) showGeneratedKey(created.generated_key, created.fleet_name);
       els.newFleetName.value = "";
       els.newFleetSystem.value = "";
-      setLine(els.fleetAdminStatus, `Флот «${name}» создан. Скопируй ключ сейчас.`, false);
       await loadAdminFleets();
+      setLine(els.fleetAdminStatus, `Флот «${name}» создан. Скопируй ключ сейчас.`, false);
     } catch (err) {
       setLine(els.fleetAdminStatus, `Ошибка создания: ${friendlyError(err)}`, true);
     } finally {
@@ -409,8 +419,8 @@
         p_active: draft.active
       });
       if (error) throw error;
-      setLine(els.fleetAdminStatus, "Профиль флота сохранён. Для нового пути запусти перерасчёт.", false);
       await loadAdminFleets();
+      setLine(els.fleetAdminStatus, `Профиль флота «${draft.name}» сохранён. Ключ флота не изменён. Для нового пути запусти перерасчёт.`, false);
     } catch (err) {
       setLine(els.fleetAdminStatus, `Ошибка сохранения: ${friendlyError(err)}`, true);
     } finally {
@@ -484,8 +494,8 @@
       const rotated = data && data[0];
       const fleet = state.adminFleets.find((item) => item.fleet_id === fleetId);
       if (rotated) showGeneratedKey(rotated.generated_key, fleet ? fleet.fleet_name : "флот");
-      setLine(els.fleetAdminStatus, "Новый ключ выпущен. Скопируй его сейчас.", false);
       await loadAdminFleets();
+      setLine(els.fleetAdminStatus, `Новый ключ флота «${fleet ? fleet.fleet_name : "флот"}» выпущен. Скопируй его сейчас.`, false);
     } catch (err) {
       setLine(els.fleetAdminStatus, `Ошибка смены ключа: ${friendlyError(err)}`, true);
     } finally {
@@ -504,9 +514,9 @@
         p_fleet_id: fleetId
       });
       if (error) throw error;
-      setLine(els.fleetAdminStatus, "Профиль флота удалён.", false);
       await loadAdminFleets();
       await loadAllFleetRoutes();
+      setLine(els.fleetAdminStatus, `Профиль флота «${fleet ? fleet.fleet_name : "флот"}» удалён.`, false);
     } catch (err) {
       setLine(els.fleetAdminStatus, `Ошибка удаления: ${friendlyError(err)}`, true);
     } finally {
@@ -517,6 +527,9 @@
   function showGeneratedKey(key, fleetName) {
     els.generatedFleetKey.hidden = false;
     els.generatedFleetKey.dataset.fleetName = fleetName || "";
+    els.generatedFleetKeyLabel.textContent = fleetName
+      ? `Новый ключ флота «${fleetName}»:`
+      : "Новый ключ:";
     els.generatedFleetKeyValue.dataset.key = String(key || "").trim();
     els.generatedFleetKeyValue.textContent = String(key || "").trim();
   }
@@ -732,21 +745,38 @@
 
       localStorage.setItem(GENERAL_ORIGIN_KEY, origin);
       localStorage.setItem(GENERAL_SERVICE_KEY, String(serviceMinutes));
-      renderRouteMap([{
-        name: `${origin} → ${candidates[candidates.length - 1].timer.system}`,
-        color: "#27a7d8",
-        nodes,
-        targetIds: new Set(candidates.map((candidate) => Number(candidate.targetSystem.id)))
-      }]);
-      renderGeneralCandidates(candidates, recommended, secondsPerJump, serviceMinutes);
-      els.routeWorkspaceTitle.textContent = `Следующая цель: ${recommended.timer.system}`;
-      els.routeWorkspaceHint.textContent = `Целей: ${candidates.length}. Первый переход: ${formatJumpCount(recommended.jumps)}, ETA ${formatUtc(recommended.eta)}.`;
+      state.generalPlan = {
+        origin,
+        candidates,
+        recommended,
+        secondsPerJump,
+        serviceMinutes,
+        routes: [{
+          name: `${origin} → ${candidates[candidates.length - 1].timer.system}`,
+          color: "#27a7d8",
+          nodes,
+          targetIds: new Set(candidates.map((candidate) => Number(candidate.targetSystem.id)))
+        }]
+      };
+      renderGeneralPlan(state.generalPlan);
       setLine(els.generalRouteStatus, `Последовательный маршрут построен. Следующая цель: ${recommended.timer.system}.`, false);
     } catch (err) {
       setLine(els.generalRouteStatus, friendlyError(err), true);
     } finally {
       els.buildGeneralRouteBtn.disabled = false;
     }
+  }
+
+  function renderGeneralPlan(plan) {
+    renderRouteMap(plan.routes);
+    renderGeneralCandidates(
+      plan.candidates,
+      plan.recommended,
+      plan.secondsPerJump,
+      plan.serviceMinutes
+    );
+    els.routeWorkspaceTitle.textContent = `Следующая цель: ${plan.recommended.timer.system}`;
+    els.routeWorkspaceHint.textContent = `Целей: ${plan.candidates.length}. Первый переход: ${formatJumpCount(plan.recommended.jumps)}, ETA ${formatUtc(plan.recommended.eta)}.`;
   }
 
   function renderGeneralCandidates(candidates, recommended, secondsPerJump, serviceMinutes) {
