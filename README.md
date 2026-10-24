@@ -239,11 +239,35 @@ SDE: соседние системы показаны фоном, рассчит
 
 - [память проекта и текущий статус](docs/PROJECT_MEMORY.md);
 - [поэтапный план рефакторинга](docs/REFACTORING_ROADMAP.md);
-- [ТЗ текущего этапа: тестовый фундамент](docs/REFACTORING_STEP_01_TEST_FOUNDATION.md);
-- [ТЗ следующего этапа: безопасная запись данных](docs/REFACTORING_STEP_02_DATA_SAFETY.md).
+- [завершённый этап 1: тестовый фундамент](docs/REFACTORING_STEP_01_TEST_FOUNDATION.md);
+- [ТЗ текущего этапа 2: безопасная запись данных](docs/REFACTORING_STEP_02_DATA_SAFETY.md).
 
 Файл `AGENTS.md` в корне содержит обязательный порядок чтения документации и
 правила обновления памяти для следующих сессий разработки.
+
+### Локальные тесты
+
+Для проверок нужен Node.js 20 или новее. После клонирования установи зависимости
+и браузер Playwright:
+
+```powershell
+npm ci
+npx playwright install chromium
+```
+
+Основные команды:
+
+```powershell
+npm run test:syntax      # синтаксис всех JS/MJS-файлов
+npm run test:e2e         # короткие браузерные сценарии
+npm run test:e2e:stress  # 40 таймеров, 4 флота и фильтры
+npm test                 # полный обязательный набор
+```
+
+Тесты запускают временный локальный сервер, мокируют Supabase и ESI и не требуют
+рабочих ключей. При ошибке снимок страницы сохраняется в `tests/artifacts/`.
+Те же команды автоматически выполняет GitHub Actions для push и pull request в
+ветку `main`.
 
 Каталог `data/solar-systems.json` собран из официального
 [EVE SDE](https://developers.eveonline.com/docs/services/static-data/) build

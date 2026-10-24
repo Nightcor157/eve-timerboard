@@ -36,7 +36,7 @@ GitHub Pages + Supabase.
 
 ### Этап 1. Тестовый фундамент
 
-Статус: **текущий**.
+Статус: **выполнен**.
 
 Подробное ТЗ: `docs/REFACTORING_STEP_01_TEST_FOUNDATION.md`.
 
@@ -50,7 +50,7 @@ GitHub Pages + Supabase.
 
 ### Этап 2. Безопасная запись данных
 
-Статус: **следующий**.
+Статус: **текущий**.
 
 Подробное ТЗ: `docs/REFACTORING_STEP_02_DATA_SAFETY.md`.
 

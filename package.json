@@ -1,0 +1,19 @@
+{
+  "name": "eve-timerboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static EVE Online timer board with Supabase storage and fleet routing.",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:syntax && npm run test:e2e && npm run test:e2e:stress",
+    "test:syntax": "node tests/check-syntax.mjs",
+    "test:e2e": "node tests/run-suite.mjs smoke",
+    "test:e2e:stress": "node tests/run-suite.mjs stress"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
