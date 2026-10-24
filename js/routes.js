@@ -124,6 +124,8 @@
     loadSystemCatalog().catch(() => {});
     bindSystemAutocomplete(els.generalOriginSystem);
     bindSystemAutocomplete(els.newFleetSystem);
+    initMultiFilter(els.generalTimerKindFilter);
+    initMultiFilter(els.generalObjectFilter);
     initMultiFilter(els.fleetTimerKindFilter);
     initMultiFilter(els.fleetObjectFilter);
     document.addEventListener("click", closeOtherMultiFilters);
@@ -1402,14 +1404,24 @@
   }
 
   function closeOtherMultiFilters(event) {
-    for (const filter of [els.fleetTimerKindFilter, els.fleetObjectFilter]) {
+    for (const filter of [
+      els.generalTimerKindFilter,
+      els.generalObjectFilter,
+      els.fleetTimerKindFilter,
+      els.fleetObjectFilter
+    ]) {
       if (filter && filter.open && !filter.contains(event.target)) filter.open = false;
     }
   }
 
   function closeMultiFiltersOnEscape(event) {
     if (event.key !== "Escape") return;
-    for (const filter of [els.fleetTimerKindFilter, els.fleetObjectFilter]) {
+    for (const filter of [
+      els.generalTimerKindFilter,
+      els.generalObjectFilter,
+      els.fleetTimerKindFilter,
+      els.fleetObjectFilter
+    ]) {
       if (filter && filter.open) filter.open = false;
     }
   }
