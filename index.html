@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261024-9" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-10" />
 </head>
 <body>
   <header class="topbar">
@@ -262,6 +262,33 @@ Hakatiz - 7-6
             Минут на цели
             <input id="generalServiceMinutes" type="number" min="0" max="240" value="10" />
           </label>
+          <label>
+            Сторона таймера
+            <select id="generalTimerKindFilter">
+              <option value="">Все таймеры</option>
+              <option value="Атака">Только атака</option>
+              <option value="Оборона">Только оборона</option>
+            </select>
+          </label>
+          <label>
+            Тип объекта
+            <select id="generalObjectFilter">
+              <option value="">Все объекты</option>
+              <option value="Astrahus">Astrahus</option>
+              <option value="Fortizar">Fortizar</option>
+              <option value="Keepstar">Keepstar</option>
+              <option value="Raitaru">Raitaru</option>
+              <option value="Azbel">Azbel</option>
+              <option value="Sotiyo">Sotiyo</option>
+              <option value="Athanor">Athanor</option>
+              <option value="Tatara">Tatara</option>
+              <option value="Metenox Moon Drill">Metenox Moon Drill</option>
+              <option value="Customs Office">Customs Office</option>
+              <option value="IHub">IHub</option>
+              <option value="TCU">TCU</option>
+              <option value="POS">POS</option>
+            </select>
+          </label>
           <button id="buildGeneralRouteBtn" class="primary-btn" type="button">Рассчитать</button>
         </div>
         <div id="generalRouteStatus" class="status-line" aria-live="polite"></div>
@@ -302,6 +329,37 @@ Hakatiz - 7-6
             <span class="hint">Изменённые профили сохраняются автоматически перед расчётом.</span>
           </div>
           <button id="calculateFleetRoutesBtn" class="primary-btn" type="button">Сохранить и рассчитать</button>
+        </div>
+
+        <div class="fleet-route-filters">
+          <label>
+            Сторона таймера
+            <select id="fleetTimerKindFilter">
+              <option value="">Все таймеры</option>
+              <option value="Атака">Только атака</option>
+              <option value="Оборона">Только оборона</option>
+            </select>
+          </label>
+          <label>
+            Тип объекта
+            <select id="fleetObjectFilter">
+              <option value="">Все объекты</option>
+              <option value="Astrahus">Astrahus</option>
+              <option value="Fortizar">Fortizar</option>
+              <option value="Keepstar">Keepstar</option>
+              <option value="Raitaru">Raitaru</option>
+              <option value="Azbel">Azbel</option>
+              <option value="Sotiyo">Sotiyo</option>
+              <option value="Athanor">Athanor</option>
+              <option value="Tatara">Tatara</option>
+              <option value="Metenox Moon Drill">Metenox Moon Drill</option>
+              <option value="Customs Office">Customs Office</option>
+              <option value="IHub">IHub</option>
+              <option value="TCU">TCU</option>
+              <option value="POS">POS</option>
+            </select>
+          </label>
+          <span class="field-help">Фильтры объединяются: «Оборона» + «Metenox Moon Drill» оставит только оборонительные таймеры метеноксов.</span>
         </div>
 
         <div class="fleet-create-grid">
@@ -406,6 +464,6 @@ Hakatiz - 7-6
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
   <script src="js/app.js?v=20261024-8"></script>
-  <script src="js/routes.js?v=20261024-9"></script>
+  <script src="js/routes.js?v=20261024-10"></script>
 </body>
 </html>

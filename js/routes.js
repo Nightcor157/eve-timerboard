@@ -59,6 +59,8 @@
     generalOriginSystem: document.getElementById("generalOriginSystem"),
     generalSecondsPerJump: document.getElementById("generalSecondsPerJump"),
     generalServiceMinutes: document.getElementById("generalServiceMinutes"),
+    generalTimerKindFilter: document.getElementById("generalTimerKindFilter"),
+    generalObjectFilter: document.getElementById("generalObjectFilter"),
     buildGeneralRouteBtn: document.getElementById("buildGeneralRouteBtn"),
     generalRouteStatus: document.getElementById("generalRouteStatus"),
     fleetAccessPanel: document.getElementById("fleetAccessPanel"),
@@ -69,6 +71,8 @@
     fleetLoginStatus: document.getElementById("fleetLoginStatus"),
     fleetAdminPanel: document.getElementById("fleetAdminPanel"),
     calculateFleetRoutesBtn: document.getElementById("calculateFleetRoutesBtn"),
+    fleetTimerKindFilter: document.getElementById("fleetTimerKindFilter"),
+    fleetObjectFilter: document.getElementById("fleetObjectFilter"),
     newFleetName: document.getElementById("newFleetName"),
     newFleetSystem: document.getElementById("newFleetSystem"),
     newFleetColor: document.getElementById("newFleetColor"),
@@ -565,9 +569,10 @@
         false
       );
       const timers = await loadTimersForRoutes(getAdminKey());
-      const targets = activeRouteTargets(timers);
+      const filters = readRouteFilters(els.fleetTimerKindFilter, els.fleetObjectFilter);
+      const targets = activeRouteTargets(timers, filters);
       if (!targets.length) {
-        throw new Error("Нет будущих активных таймеров с указанной системой.");
+        throw new Error(`Нет будущих активных таймеров под фильтр «${describeRouteFilters(filters)}».`);
       }
 
       const resolved = await resolveSystemNames([
@@ -640,7 +645,11 @@
         p_assignments: payload
       });
       if (error) throw error;
-      setLine(els.fleetAdminStatus, `Маршруты рассчитаны. Назначено целей: ${Number(data || payload.length)}.`, false);
+      setLine(
+        els.fleetAdminStatus,
+        `Маршруты рассчитаны. Фильтр: ${describeRouteFilters(filters)}. Назначено целей: ${Number(data || payload.length)}.`,
+        false
+      );
       await loadAllFleetRoutes();
     } catch (err) {
       setLine(els.fleetAdminStatus, `Расчёт не сохранён: ${friendlyError(err)}`, true);
@@ -690,8 +699,11 @@
       const origin = await requireSystemName(enteredOrigin, els.generalOriginSystem);
       els.generalOriginSystem.value = origin;
       const timers = await loadTimersForRoutes(readKey);
-      const targets = activeRouteTargets(timers);
-      if (!targets.length) throw new Error("Нет будущих активных таймеров с указанной системой.");
+      const filters = readRouteFilters(els.generalTimerKindFilter, els.generalObjectFilter);
+      const targets = activeRouteTargets(timers, filters);
+      if (!targets.length) {
+        throw new Error(`Нет будущих активных таймеров под фильтр «${describeRouteFilters(filters)}».`);
+      }
 
       const resolved = await resolveSystemNames([origin, ...targets.map((timer) => timer.system)]);
       const originSystem = resolved.get(normalizeName(origin));
@@ -751,6 +763,7 @@
         recommended,
         secondsPerJump,
         serviceMinutes,
+        filterDescription: describeRouteFilters(filters),
         routes: [{
           name: `${origin} → ${candidates[candidates.length - 1].timer.system}`,
           color: "#27a7d8",
@@ -759,7 +772,11 @@
         }]
       };
       renderGeneralPlan(state.generalPlan);
-      setLine(els.generalRouteStatus, `Последовательный маршрут построен. Следующая цель: ${recommended.timer.system}.`, false);
+      setLine(
+        els.generalRouteStatus,
+        `Маршрут построен. Фильтр: ${describeRouteFilters(filters)}. Следующая цель: ${recommended.timer.system}.`,
+        false
+      );
     } catch (err) {
       setLine(els.generalRouteStatus, friendlyError(err), true);
     } finally {
@@ -776,7 +793,7 @@
       plan.serviceMinutes
     );
     els.routeWorkspaceTitle.textContent = `Следующая цель: ${plan.recommended.timer.system}`;
-    els.routeWorkspaceHint.textContent = `Целей: ${plan.candidates.length}. Первый переход: ${formatJumpCount(plan.recommended.jumps)}, ETA ${formatUtc(plan.recommended.eta)}.`;
+    els.routeWorkspaceHint.textContent = `Целей: ${plan.candidates.length}. Фильтр: ${plan.filterDescription || "все таймеры и объекты"}. Первый переход: ${formatJumpCount(plan.recommended.jumps)}, ETA ${formatUtc(plan.recommended.eta)}.`;
   }
 
   function renderGeneralCandidates(candidates, recommended, secondsPerJump, serviceMinutes) {
@@ -1142,17 +1159,35 @@
     return data || [];
   }
 
-  function activeRouteTargets(timers) {
+  function activeRouteTargets(timers, filters = {}) {
     const now = Date.now();
     const seen = new Set();
+    const timerKind = normalizeName(filters.timerKind);
+    const objectName = normalizeName(filters.objectName);
     return timers.filter((timer) => {
       const key = timer.id;
       if (seen.has(key)) return false;
       seen.add(key);
       return !normalizeResult(timer.note) &&
         String(timer.system || "").trim() &&
+        (!timerKind || normalizeName(timer.distance) === timerKind) &&
+        (!objectName || normalizeName(timer.object_name) === objectName) &&
         new Date(timer.end_at).getTime() > now;
     });
+  }
+
+  function readRouteFilters(timerKindSelect, objectSelect) {
+    return {
+      timerKind: String(timerKindSelect && timerKindSelect.value || "").trim(),
+      objectName: String(objectSelect && objectSelect.value || "").trim()
+    };
+  }
+
+  function describeRouteFilters(filters = {}) {
+    const parts = [];
+    if (filters.timerKind) parts.push(filters.timerKind);
+    if (filters.objectName) parts.push(filters.objectName);
+    return parts.length ? parts.join(" · ") : "все таймеры и объекты";
   }
 
   async function loadSystemCatalog() {

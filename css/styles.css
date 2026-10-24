@@ -802,7 +802,28 @@ input.table-input:focus {
 }
 
 .route-controls {
-  grid-template-columns: minmax(16rem, 1fr) repeat(2, minmax(9rem, 12rem)) auto;
+  grid-template-columns: minmax(16rem, 1fr) repeat(4, minmax(9rem, 12rem)) auto;
+}
+
+.fleet-route-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(12rem, 18rem)) minmax(18rem, 1fr);
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.fleet-route-filters select {
+  width: 100%;
+  min-height: 2.55rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.fleet-route-filters .field-help {
+  align-self: center;
+  margin: 1.25rem 0 0;
 }
 
 .fleet-login-grid {
@@ -1292,6 +1313,7 @@ input.system-autocomplete.is-invalid {
     overflow-x: visible;
   }
   .route-controls,
+  .fleet-route-filters,
   .fleet-login-grid,
   .fleet-create-grid,
   .fleet-profile-row {
@@ -1308,6 +1330,7 @@ input.system-autocomplete.is-invalid {
   }
   .segmented-control,
   .route-controls,
+  .fleet-route-filters,
   .fleet-login-grid,
   .fleet-create-grid,
   .fleet-profile-row,
