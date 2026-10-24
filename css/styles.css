@@ -815,10 +815,124 @@ input.table-input:focus {
   border-bottom: 1px solid var(--border);
 }
 
-.fleet-route-filters select {
+.filter-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.filter-field-label {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.multi-filter {
+  position: relative;
+  min-width: 0;
+}
+
+.multi-filter summary {
+  position: relative;
+  display: flex;
+  align-items: center;
   width: 100%;
   min-height: 2.55rem;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem 2rem 0.55rem 0.65rem;
+  color: var(--text);
+  background: #081824;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.multi-filter summary::-webkit-details-marker {
+  display: none;
+}
+
+.multi-filter summary::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 0.75rem;
+  width: 0.48rem;
+  height: 0.48rem;
+  border-inline-end: 1px solid var(--muted);
+  border-block-end: 1px solid var(--muted);
+  transform: translateY(-0.12rem) rotate(45deg);
+  transition: transform 0.12s ease;
+}
+
+.multi-filter[open] summary::after {
+  transform: translateY(0.14rem) rotate(225deg);
+}
+
+.multi-filter summary:focus-visible,
+.multi-filter[open] summary {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(39, 167, 216, 0.14);
+  outline: none;
+}
+
+.multi-filter summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-filter-menu {
+  position: absolute;
+  z-index: 20;
+  inset-block-start: calc(100% + 0.35rem);
+  inset-inline-start: 0;
+  width: max(100%, min(24rem, calc(100vw - 2rem)));
+  padding: 0.45rem;
+  border: 1px solid #31556a;
+  border-radius: 0.55rem;
+  background: #0a1c29;
+  box-shadow: 0 0.8rem 2rem var(--shadow);
+}
+
+.multi-filter-actions {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.15rem 0.15rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.multi-filter-actions button {
+  min-height: 2rem;
+  padding: 0.35rem 0.55rem;
+  color: var(--muted);
+  background: #0d2534;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.multi-filter-actions button:hover,
+.multi-filter-actions button:focus-visible {
+  color: var(--text);
+  border-color: #467086;
+  outline: none;
+}
+
+.multi-filter-options {
+  display: grid;
+  max-height: 18rem;
+  padding-top: 0.35rem;
+  overflow-y: auto;
+}
+
+.multi-filter-option {
+  min-height: 2.15rem;
+  padding: 0.4rem 0.45rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.multi-filter-option:hover {
+  background: #102b3b;
 }
 
 .fleet-route-filters .field-help {

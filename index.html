@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261024-15" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-18" />
 </head>
 <body>
   <header class="topbar">
@@ -332,34 +332,71 @@ Hakatiz - 7-6
         </div>
 
         <div class="fleet-route-filters">
-          <label>
-            Сторона таймера
-            <select id="fleetTimerKindFilter">
-              <option value="">Все таймеры</option>
-              <option value="Атака">Только атака</option>
-              <option value="Оборона">Только оборона</option>
-            </select>
-          </label>
-          <label>
-            Тип объекта
-            <select id="fleetObjectFilter">
-              <option value="">Все объекты</option>
-              <option value="Astrahus">Astrahus</option>
-              <option value="Fortizar">Fortizar</option>
-              <option value="Keepstar">Keepstar</option>
-              <option value="Raitaru">Raitaru</option>
-              <option value="Azbel">Azbel</option>
-              <option value="Sotiyo">Sotiyo</option>
-              <option value="Athanor">Athanor</option>
-              <option value="Tatara">Tatara</option>
-              <option value="Metenox Moon Drill">Metenox Moon Drill</option>
-              <option value="Customs Office">Customs Office</option>
-              <option value="IHub">IHub</option>
-              <option value="TCU">TCU</option>
-              <option value="POS">POS</option>
-            </select>
-          </label>
-          <span class="field-help">Фильтры объединяются: «Оборона» + «Metenox Moon Drill» оставит только оборонительные таймеры метеноксов.</span>
+          <div class="filter-field">
+            <span class="filter-field-label">Сторона таймера</span>
+            <details
+              id="fleetTimerKindFilter"
+              class="multi-filter"
+              data-all-label="Все таймеры"
+              data-empty-label="Таймеры не выбраны"
+              data-count-label="типа таймера"
+            >
+              <summary><span data-filter-summary>Все таймеры</span></summary>
+              <div class="multi-filter-menu">
+                <div class="multi-filter-actions">
+                  <button type="button" data-filter-action="all">Выбрать все</button>
+                  <button type="button" data-filter-action="none">Снять все</button>
+                </div>
+                <div class="multi-filter-options">
+                  <label class="checkline multi-filter-option">
+                    <input type="checkbox" value="Атака" checked />
+                    <span class="checkbox-box" aria-hidden="true"></span>
+                    <span>Атака</span>
+                  </label>
+                  <label class="checkline multi-filter-option">
+                    <input type="checkbox" value="Оборона" checked />
+                    <span class="checkbox-box" aria-hidden="true"></span>
+                    <span>Оборона</span>
+                  </label>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="filter-field">
+            <span class="filter-field-label">Тип объекта</span>
+            <details
+              id="fleetObjectFilter"
+              class="multi-filter"
+              data-all-label="Все объекты"
+              data-empty-label="Объекты не выбраны"
+              data-count-label="типов объектов"
+            >
+              <summary><span data-filter-summary>Все объекты</span></summary>
+              <div class="multi-filter-menu">
+                <div class="multi-filter-actions">
+                  <button type="button" data-filter-action="all">Выбрать все</button>
+                  <button type="button" data-filter-action="none">Снять все</button>
+                </div>
+                <div class="multi-filter-options">
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Astrahus" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Astrahus</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Fortizar" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Fortizar</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Keepstar" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Keepstar</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Raitaru" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Raitaru</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Azbel" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Azbel</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Sotiyo" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Sotiyo</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Athanor" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Athanor</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Tatara" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Tatara</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Metenox Moon Drill" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Metenox Moon Drill</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="Customs Office" checked /><span class="checkbox-box" aria-hidden="true"></span><span>Customs Office</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="IHub" checked /><span class="checkbox-box" aria-hidden="true"></span><span>IHub</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="TCU" checked /><span class="checkbox-box" aria-hidden="true"></span><span>TCU</span></label>
+                  <label class="checkline multi-filter-option"><input type="checkbox" value="POS" checked /><span class="checkbox-box" aria-hidden="true"></span><span>POS</span></label>
+                </div>
+              </div>
+            </details>
+          </div>
+          <span class="field-help">Внутри списка можно включить несколько вариантов. Два фильтра применяются одновременно.</span>
         </div>
 
         <div class="fleet-create-grid">
@@ -465,6 +502,6 @@ Hakatiz - 7-6
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
   <script src="js/app.js?v=20261024-8"></script>
-  <script src="js/routes.js?v=20261024-17"></script>
+  <script src="js/routes.js?v=20261024-18"></script>
 </body>
 </html>

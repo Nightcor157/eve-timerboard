@@ -123,6 +123,10 @@
     loadSystemCatalog().catch(() => {});
     bindSystemAutocomplete(els.generalOriginSystem);
     bindSystemAutocomplete(els.newFleetSystem);
+    initMultiFilter(els.fleetTimerKindFilter);
+    initMultiFilter(els.fleetObjectFilter);
+    document.addEventListener("click", closeOtherMultiFilters);
+    document.addEventListener("keydown", closeMultiFiltersOnEscape);
 
     els.boardTab.addEventListener("click", () => showMainView("board"));
     els.routesTab.addEventListener("click", handleRoutesTabClick);
@@ -1299,32 +1303,114 @@
   function activeRouteTargets(timers, filters = {}) {
     const now = Date.now();
     const seen = new Set();
-    const timerKind = normalizeName(filters.timerKind);
-    const objectName = normalizeName(filters.objectName);
+    const timerKinds = normalizedFilterSelection(filters, "timerKinds", "timerKind", "timerKindsAll");
+    const objectNames = normalizedFilterSelection(filters, "objectNames", "objectName", "objectNamesAll");
     return timers.filter((timer) => {
       const key = timer.id;
       if (seen.has(key)) return false;
       seen.add(key);
       return !normalizeResult(timer.note) &&
         String(timer.system || "").trim() &&
-        (!timerKind || normalizeName(timer.distance) === timerKind) &&
-        (!objectName || normalizeName(timer.object_name) === objectName) &&
+        (timerKinds.all || timerKinds.values.has(normalizeName(timer.distance))) &&
+        (objectNames.all || objectNames.values.has(normalizeName(timer.object_name))) &&
         new Date(timer.end_at).getTime() > now;
     });
   }
 
-  function readRouteFilters(timerKindSelect, objectSelect) {
+  function readRouteFilters(timerKindControl, objectControl) {
+    const timerKinds = readFilterControl(timerKindControl);
+    const objectNames = readFilterControl(objectControl);
     return {
-      timerKind: String(timerKindSelect && timerKindSelect.value || "").trim(),
-      objectName: String(objectSelect && objectSelect.value || "").trim()
+      timerKinds: timerKinds.values,
+      timerKindsAll: timerKinds.all,
+      objectNames: objectNames.values,
+      objectNamesAll: objectNames.all
     };
   }
 
   function describeRouteFilters(filters = {}) {
+    const timerKinds = normalizedFilterSelection(filters, "timerKinds", "timerKind", "timerKindsAll");
+    const objectNames = normalizedFilterSelection(filters, "objectNames", "objectName", "objectNamesAll");
     const parts = [];
-    if (filters.timerKind) parts.push(filters.timerKind);
-    if (filters.objectName) parts.push(filters.objectName);
+    if (!timerKinds.all) parts.push(describeFilterSelection(timerKinds, "таймеры не выбраны", "типа таймера"));
+    if (!objectNames.all) parts.push(describeFilterSelection(objectNames, "объекты не выбраны", "типов объектов"));
     return parts.length ? parts.join(" · ") : "все таймеры и объекты";
+  }
+
+  function initMultiFilter(filter) {
+    if (!filter || filter.tagName !== "DETAILS") return;
+    filter.addEventListener("change", (event) => {
+      if (event.target.matches('input[type="checkbox"]')) updateMultiFilterSummary(filter);
+    });
+    filter.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-filter-action]");
+      if (!action) return;
+      const checked = action.dataset.filterAction === "all";
+      for (const checkbox of filter.querySelectorAll('input[type="checkbox"]')) {
+        checkbox.checked = checked;
+      }
+      updateMultiFilterSummary(filter);
+    });
+    updateMultiFilterSummary(filter);
+  }
+
+  function updateMultiFilterSummary(filter) {
+    const summary = filter.querySelector("[data-filter-summary]");
+    if (!summary) return;
+    const checkboxes = Array.from(filter.querySelectorAll('input[type="checkbox"]'));
+    const selected = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
+    const allSelected = checkboxes.length > 0 && selected.length === checkboxes.length;
+    let label = filter.dataset.emptyLabel || "Ничего не выбрано";
+    if (allSelected) label = filter.dataset.allLabel || "Выбрано всё";
+    else if (selected.length <= 2 && selected.length > 0) label = selected.join(" + ");
+    else if (selected.length > 2) label = `${selected.length} ${filter.dataset.countLabel || "выбрано"}`;
+    summary.textContent = label;
+    summary.title = selected.length ? selected.join(", ") : label;
+  }
+
+  function closeOtherMultiFilters(event) {
+    for (const filter of [els.fleetTimerKindFilter, els.fleetObjectFilter]) {
+      if (filter && filter.open && !filter.contains(event.target)) filter.open = false;
+    }
+  }
+
+  function closeMultiFiltersOnEscape(event) {
+    if (event.key !== "Escape") return;
+    for (const filter of [els.fleetTimerKindFilter, els.fleetObjectFilter]) {
+      if (filter && filter.open) filter.open = false;
+    }
+  }
+
+  function readFilterControl(control) {
+    if (!control) return { values: [], all: true };
+    if (control.tagName === "DETAILS") {
+      const checkboxes = Array.from(control.querySelectorAll('input[type="checkbox"]'));
+      const values = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value.trim());
+      return {
+        values,
+        all: checkboxes.length > 0 && values.length === checkboxes.length
+      };
+    }
+    const value = String(control.value || "").trim();
+    return { values: value ? [value] : [], all: !value };
+  }
+
+  function normalizedFilterSelection(filters, listKey, legacyKey, allKey) {
+    const rawValues = Array.isArray(filters[listKey])
+      ? filters[listKey]
+      : filters[legacyKey]
+        ? [filters[legacyKey]]
+        : [];
+    const labels = rawValues.map((value) => String(value || "").trim()).filter(Boolean);
+    const values = new Set(labels.map(normalizeName).filter(Boolean));
+    const all = typeof filters[allKey] === "boolean" ? filters[allKey] : values.size === 0;
+    return { values, labels, all };
+  }
+
+  function describeFilterSelection(selection, emptyLabel, countLabel) {
+    if (!selection.labels.length) return emptyLabel;
+    if (selection.labels.length <= 2) return selection.labels.join(" + ");
+    return `${selection.labels.length} ${countLabel}`;
   }
 
   async function loadSystemCatalog() {
