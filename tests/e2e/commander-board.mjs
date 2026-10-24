@@ -51,6 +51,15 @@ await runBrowserTest("fleet commander result controls", async ({ page }) => {
   await page.locator('#routeList .route-list-row[data-timer-id="timer-1"] [data-route-result="Защищена"]').click();
   await page.waitForFunction(() => !document.querySelector('.map-route-edges [data-from-id="30000142"]') && document.querySelector('.map-route-edges [data-from-id="30002187"][data-to-id="30002189"]'));
   assert.deepEqual(await routeEdges(page), ["30002187:30002189"]);
+  await page.click("#boardTab");
+  await page.waitForSelector('#timersBody tr[data-timer-id="timer-1"]');
+  assert.equal(await page.locator("#showEnded").isChecked(), true);
+  assert.equal(
+    await page.locator('#timersBody tr[data-timer-id="timer-1"] .is-selected-result').textContent(),
+    "Защищена"
+  );
+  await page.click("#routesTab");
+  await page.waitForSelector('#routeList .route-list-row[data-timer-id="timer-1"]');
   await page.locator('#routeList .route-list-row[data-timer-id="timer-1"] [data-route-result=""]').click();
   await page.waitForFunction(() => window.__rpcLog.filter((item) => item.name === "set_fleet_timer_result").length >= 2);
   await page.click("#boardTab");
@@ -58,7 +67,7 @@ await runBrowserTest("fleet commander result controls", async ({ page }) => {
   assert.equal(await page.locator('#timersBody tr[data-timer-id="timer-2"] .result-actions button').count(), 0);
   assert.equal(await page.locator("#timersBody .table-control").count(), 0);
   await page.locator('#timersBody tr[data-timer-id="timer-1"] .result-action-btn').first().click();
-  await page.waitForFunction(() => !document.querySelector('#timersBody tr[data-timer-id="timer-1"]'));
+  await page.waitForFunction(() => document.querySelector('#timersBody tr[data-timer-id="timer-1"] .is-selected-result')?.textContent === "Защищена");
   const lastResultRpc = await page.evaluate(() => window.__rpcLog.filter((item) => item.name === "set_fleet_timer_result").at(-1));
   assert.equal(lastResultRpc.args.p_access_key, "A1B2C3D4E5F60718293A4B5C");
   assert.equal(lastResultRpc.args.p_timer_id, "timer-1");

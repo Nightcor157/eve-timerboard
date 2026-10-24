@@ -37,7 +37,9 @@ await runBrowserTest("completed history cleanup", async ({ page }) => {
   await page.fill("#adminViewKey", "admin-test-key");
   await page.click("#confirmAdminAccessBtn");
   await page.waitForFunction(() => !document.querySelector("#adminPanel")?.hidden);
+  assert.equal(await page.locator("#adminPanel #clearHistoryBtn").count(), 1);
   assert.equal(await page.locator("#clearHistoryBtn").evaluate((element) => element.hidden), false);
+  assert.equal(await page.locator("#clearHistoryBtn").textContent(), "Очистить закрытые таймеры из БД");
   page.once("dialog", (dialog) => dialog.accept());
   await page.click("#clearHistoryBtn");
   await page.waitForFunction(() => document.querySelector("#adminStatus")?.textContent.includes("Удалено таймеров: 2"));

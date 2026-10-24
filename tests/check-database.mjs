@@ -95,6 +95,13 @@ try {
   );
   await db.query("select public.set_timerboard_view_key($1, $2, $3)", ["main", "admin-test-key", "view-test-key-12"]);
   await assert.rejects(
+    db.query("select public.clear_timer_history($1, $2)", ["main", "wrong-admin-key"]),
+    /wrong admin key/i
+  );
+  const cleared = await db.query("select public.clear_timer_history($1, $2) as count", ["main", "admin-test-key"]);
+  assert.equal(cleared.rows[0].count, 1);
+  assert.equal(await timerCount(db), countBeforeFailure - 1);
+  await assert.rejects(
     db.query(`
       insert into public.timers (board_id, raw_text, end_at, distance)
       values ('main', 'invalid kind', now(), 'Недопустимо')

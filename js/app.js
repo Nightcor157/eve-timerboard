@@ -34,6 +34,7 @@ import { sortBoardTimers } from "./ui/board-view.js";
   let timers = [];
   let lastRenderedSignature = "";
   let fleetBoardAccess = null;
+  let showEndedBeforeAdmin = false;
   let adminViewEnabled = false;
   let adminKeyValidated = false;
   let viewAccessGranted = false;
@@ -263,7 +264,14 @@ import { sortBoardTimers } from "./ui/board-view.js";
   }
 
   function applyAdminView(enabled, updateHistory = true) {
+    const wasAdminViewEnabled = adminViewEnabled;
     adminViewEnabled = Boolean(enabled);
+    if (adminViewEnabled && !wasAdminViewEnabled) {
+      showEndedBeforeAdmin = els.showEnded.checked;
+      els.showEnded.checked = true;
+    } else if (!adminViewEnabled && wasAdminViewEnabled) {
+      els.showEnded.checked = showEndedBeforeAdmin;
+    }
     document.body.classList.toggle("is-admin-view", adminViewEnabled);
     els.adminPanel.hidden = !adminViewEnabled;
     document.querySelectorAll("th.admin-only").forEach((element) => {
@@ -774,13 +782,16 @@ import { sortBoardTimers } from "./ui/board-view.js";
   function applyRouteResultUpdate(event) {
     const detail = event && event.detail;
     if (!detail || !detail.timerId) return;
+    const result = normalizeStructureResult(detail.result);
     timers = timers.map((timer) => String(timer.id) === String(detail.timerId) ? {
       ...timer,
-      note: normalizeStructureResult(detail.result),
+      note: result,
       updated_at: new Date().toISOString()
     } : timer);
+    if (result) els.showEnded.checked = true;
     lastRenderedSignature = "";
     renderTimers();
+    void loadTimers();
   }
 
   function canFleetEditResult(timerId) {

@@ -16,6 +16,8 @@ assert.match(sql, /is distinct from v_timer\.note/i);
 
 assert.match(sql, /create or replace function public\.add_timer\s*\(/i);
 assert.match(sql, /create function public\.update_timer_admin_fields\s*\(/i);
+assert.match(sql, /create or replace function public\.clear_timer_history\s*\(/i);
+assert.match(sql, /clear_timer_history[\s\S]*assert_timerboard_admin[\s\S]*delete from public\.timers/i);
 assert.match(sql, /grant execute on function public\.add_timers\s*\(\s*text,\s*text,\s*jsonb\s*\)/is);
 assert.match(sql, /grant execute on function public\.patch_timer_admin_fields\s*\(\s*text,\s*text,\s*uuid,\s*jsonb,\s*timestamptz\s*\)/is);
 assert.match(sql, /revoke execute on all functions in schema public from public/i);
