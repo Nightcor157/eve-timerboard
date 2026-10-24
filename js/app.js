@@ -406,8 +406,8 @@ import { sortBoardTimers } from "./ui/board-view.js";
       setStatus("Для смены ключа просмотра нужен админ-ключ.", true);
       return;
     }
-    if (newViewKey.length < 6) {
-      setStatus("Ключ просмотра должен быть минимум 6 символов.", true);
+    if (newViewKey.length < 12) {
+      setStatus("Ключ просмотра должен быть минимум 12 символов.", true);
       return;
     }
 

@@ -32,6 +32,29 @@ create table if not exists public.timers (
   updated_at timestamptz not null default now()
 );
 
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'timers_distance_values_chk'
+      and conrelid = 'public.timers'::regclass
+  ) then
+    alter table public.timers
+      add constraint timers_distance_values_chk
+      check (distance in ('', 'Атака', 'Оборона')) not valid;
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'timers_note_values_chk'
+      and conrelid = 'public.timers'::regclass
+  ) then
+    alter table public.timers
+      add constraint timers_note_values_chk
+      check (note in ('', 'Защищена', 'Уничтожена')) not valid;
+  end if;
+end;
+$$;
+
 create table if not exists public.fleet_profiles (
   id uuid primary key default gen_random_uuid(),
   board_id text not null default 'main',
@@ -150,8 +173,8 @@ begin
     raise exception 'board_id is required';
   end if;
 
-  if p_admin_key is null or length(p_admin_key) < 6 then
-    raise exception 'admin key must be at least 6 characters';
+  if p_admin_key is null or length(p_admin_key) < 12 then
+    raise exception 'admin key must be at least 12 characters';
   end if;
 
   insert into public.timerboard_settings (board_id, admin_key_hash)
@@ -203,8 +226,8 @@ as $$
 begin
   perform public.assert_timerboard_admin(trim(p_board_id), p_admin_key);
 
-  if p_view_key is null or length(p_view_key) < 6 then
-    raise exception 'view key must be at least 6 characters';
+  if p_view_key is null or length(p_view_key) < 12 then
+    raise exception 'view key must be at least 12 characters';
   end if;
 
   update public.timerboard_settings
@@ -1143,6 +1166,7 @@ end;
 $$;
 
 grant usage on schema public to anon, authenticated;
+revoke execute on all functions in schema public from public;
 revoke all on table public.timerboard_settings from anon, authenticated;
 revoke select, insert, update, delete on table public.timers from anon, authenticated;
 revoke all on table public.fleet_profiles from anon, authenticated;
@@ -1159,6 +1183,11 @@ revoke all on function public.assert_fleet_access(text, uuid, text)
 from public, anon, authenticated;
 revoke all on function public.clear_timer_history(text, text)
 from public, anon, authenticated;
+revoke all on function public.add_timers(text, text, jsonb)
+from public;
+revoke all on function public.patch_timer_admin_fields(
+  text, text, uuid, jsonb, timestamptz
+) from public;
 
 grant execute on function public.get_timers(text, text)
 to anon, authenticated;
