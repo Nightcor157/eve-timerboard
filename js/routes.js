@@ -8,6 +8,7 @@
   const ESI_COMPATIBILITY_DATE = "2025-09-30";
   const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
   const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
+  const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
 
   const hasSupabaseConfig = Boolean(
     CONFIG.supabaseUrl &&
@@ -31,6 +32,15 @@
     routeCache: new Map(),
     nameCache: new Map(),
     idNameCache: new Map(),
+    systemCatalog: [],
+    systemById: new Map(),
+    systemByName: new Map(),
+    systemCatalogPromise: null,
+    autocompleteInput: null,
+    autocompleteItems: [],
+    autocompleteIndex: -1,
+    mapZoom: 1,
+    lastMapRoutes: null,
     loadingFleets: false
   };
 
@@ -68,6 +78,9 @@
     routeWorkspaceTitle: document.getElementById("routeWorkspaceTitle"),
     routeWorkspaceHint: document.getElementById("routeWorkspaceHint"),
     reloadRouteBtn: document.getElementById("reloadRouteBtn"),
+    routeZoomOutBtn: document.getElementById("routeZoomOutBtn"),
+    routeZoomResetBtn: document.getElementById("routeZoomResetBtn"),
+    routeZoomInBtn: document.getElementById("routeZoomInBtn"),
     routeMap: document.getElementById("routeMap"),
     routeLegend: document.getElementById("routeLegend"),
     routeList: document.getElementById("routeList"),
@@ -80,6 +93,9 @@
 
   function init() {
     els.generalOriginSystem.value = localStorage.getItem(GENERAL_ORIGIN_KEY) || "";
+    loadSystemCatalog().catch(() => {});
+    bindSystemAutocomplete(els.generalOriginSystem);
+    bindSystemAutocomplete(els.newFleetSystem);
 
     els.boardTab.addEventListener("click", () => showMainView("board"));
     els.routesTab.addEventListener("click", () => showMainView("routes"));
@@ -95,6 +111,9 @@
     });
     els.rememberFleetKey.addEventListener("change", rememberCurrentFleetKey);
     els.reloadRouteBtn.addEventListener("click", reloadCurrentRoute);
+    els.routeZoomOutBtn.addEventListener("click", () => changeRouteZoom(-0.25));
+    els.routeZoomResetBtn.addEventListener("click", resetRouteZoom);
+    els.routeZoomInBtn.addEventListener("click", () => changeRouteZoom(0.25));
 
     els.createFleetBtn.addEventListener("click", createFleet);
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
@@ -217,6 +236,7 @@
   }
 
   function renderFleetProfiles() {
+    hideSystemSuggestions();
     if (!state.adminFleets.length) {
       els.fleetProfilesList.innerHTML = '<div class="empty">Флоты ещё не созданы.</div>';
       return;
@@ -230,7 +250,7 @@
         </label>
         <label>
           Текущая система
-          <input data-field="system" type="text" value="${escapeHtml(fleet.current_system)}" />
+          <input class="system-autocomplete" data-field="system" type="text" autocomplete="off" value="${escapeHtml(fleet.current_system)}" />
         </label>
         <label>
           Цвет
@@ -259,23 +279,27 @@
         </div>
       </div>
     `).join("");
+    els.fleetProfilesList.querySelectorAll('input[data-field="system"]').forEach(bindSystemAutocomplete);
   }
 
   async function createFleet() {
+    hideSystemSuggestions();
     const adminKey = getAdminKey();
     if (!adminKey) {
       setLine(els.fleetAdminStatus, "Нужен главный админ-ключ.", true);
       return;
     }
     const name = els.newFleetName.value.trim();
-    const system = els.newFleetSystem.value.trim();
-    if (!name || !system) {
+    const enteredSystem = els.newFleetSystem.value.trim();
+    if (!name || !enteredSystem) {
       setLine(els.fleetAdminStatus, "Укажи название и текущую систему флота.", true);
       return;
     }
 
     els.createFleetBtn.disabled = true;
     try {
+      const system = await requireSystemName(enteredSystem, els.newFleetSystem);
+      els.newFleetSystem.value = system;
       const { data, error } = await db.rpc("create_fleet", {
         p_board_id: BOARD_ID,
         p_admin_key: adminKey,
@@ -312,18 +336,20 @@
   }
 
   async function saveFleetProfile(row, fleetId, button) {
+    hideSystemSuggestions();
     button.disabled = true;
     try {
+      const draft = await readFleetDraft(row, fleetId);
       const { error } = await db.rpc("update_fleet", {
         p_board_id: BOARD_ID,
         p_admin_key: getAdminKey(),
         p_fleet_id: fleetId,
-        p_name: row.querySelector('[data-field="name"]').value.trim(),
-        p_color: row.querySelector('[data-field="color"]').value,
-        p_current_system: row.querySelector('[data-field="system"]').value.trim(),
-        p_seconds_per_jump: boundedNumber(row.querySelector('[data-field="seconds"]').value, 5, 3600, 60),
-        p_service_minutes: boundedNumber(row.querySelector('[data-field="service"]').value, 0, 240, 10),
-        p_active: row.querySelector('[data-field="active"]').checked
+        p_name: draft.name,
+        p_color: draft.color,
+        p_current_system: draft.current_system,
+        p_seconds_per_jump: draft.seconds_per_jump,
+        p_service_minutes: draft.service_minutes,
+        p_active: draft.active
       });
       if (error) throw error;
       setLine(els.fleetAdminStatus, "Профиль флота сохранён. Для нового пути запусти перерасчёт.", false);
@@ -333,6 +359,59 @@
     } finally {
       button.disabled = false;
     }
+  }
+
+  async function readFleetDraft(row, fleetId) {
+    const name = row.querySelector('[data-field="name"]').value.trim();
+    if (!name) throw new Error("У каждого флота должно быть название.");
+    const systemInput = row.querySelector('[data-field="system"]');
+    const currentSystem = await requireSystemName(systemInput.value, systemInput);
+    systemInput.value = currentSystem;
+    return {
+      fleet_id: fleetId,
+      name,
+      color: row.querySelector('[data-field="color"]').value,
+      current_system: currentSystem,
+      seconds_per_jump: boundedNumber(row.querySelector('[data-field="seconds"]').value, 5, 3600, 60),
+      service_minutes: boundedNumber(row.querySelector('[data-field="service"]').value, 0, 240, 10),
+      active: row.querySelector('[data-field="active"]').checked
+    };
+  }
+
+  function fleetDraftChanged(draft, saved) {
+    return draft.name !== saved.fleet_name ||
+      draft.color !== saved.fleet_color ||
+      normalizeName(draft.current_system) !== normalizeName(saved.current_system) ||
+      draft.seconds_per_jump !== Number(saved.seconds_per_jump) ||
+      draft.service_minutes !== Number(saved.service_minutes) ||
+      draft.active !== Boolean(saved.active);
+  }
+
+  async function saveFleetDraftsBeforeCalculation() {
+    const rows = [...els.fleetProfilesList.querySelectorAll(".fleet-profile-row")];
+    let changed = 0;
+    for (const row of rows) {
+      const fleetId = row.dataset.fleetId;
+      const saved = state.adminFleets.find((fleet) => fleet.fleet_id === fleetId);
+      if (!saved) continue;
+      const draft = await readFleetDraft(row, fleetId);
+      if (!fleetDraftChanged(draft, saved)) continue;
+      const { error } = await db.rpc("update_fleet", {
+        p_board_id: BOARD_ID,
+        p_admin_key: getAdminKey(),
+        p_fleet_id: fleetId,
+        p_name: draft.name,
+        p_color: draft.color,
+        p_current_system: draft.current_system,
+        p_seconds_per_jump: draft.seconds_per_jump,
+        p_service_minutes: draft.service_minutes,
+        p_active: draft.active
+      });
+      if (error) throw error;
+      changed += 1;
+    }
+    if (changed) await loadAdminFleets();
+    return changed;
   }
 
   async function rotateFleetKey(fleetId, button) {
@@ -395,19 +474,24 @@
   }
 
   async function calculateFleetRoutes() {
+    hideSystemSuggestions();
     if (!getAdminKey()) {
       setLine(els.fleetAdminStatus, "Нужен главный админ-ключ.", true);
       return;
     }
-    const fleets = state.adminFleets.filter((fleet) => fleet.active);
-    if (!fleets.length) {
-      setLine(els.fleetAdminStatus, "Создай и включи хотя бы один флот.", true);
-      return;
-    }
-
     els.calculateFleetRoutesBtn.disabled = true;
-    setLine(els.fleetAdminStatus, "Загружаю таймеры и рассчитываю переходы ESI…", false);
+    setLine(els.fleetAdminStatus, "Проверяю и сохраняю изменения профилей…", false);
     try {
+      const changedProfiles = await saveFleetDraftsBeforeCalculation();
+      const fleets = state.adminFleets.filter((fleet) => fleet.active);
+      if (!fleets.length) throw new Error("Создай и включи хотя бы один флот.");
+      setLine(
+        els.fleetAdminStatus,
+        changedProfiles
+          ? `Профилей обновлено: ${changedProfiles}. Загружаю таймеры и рассчитываю переходы ESI…`
+          : "Загружаю таймеры и рассчитываю переходы ESI…",
+        false
+      );
       const timers = await loadTimersForRoutes(getAdminKey());
       const targets = activeRouteTargets(timers);
       if (!targets.length) {
@@ -502,9 +586,9 @@
   }
 
   async function buildGeneralRoute() {
-    const origin = els.generalOriginSystem.value.trim();
+    const enteredOrigin = els.generalOriginSystem.value.trim();
     const secondsPerJump = boundedNumber(els.generalSecondsPerJump.value, 5, 3600, 60);
-    if (!origin) {
+    if (!enteredOrigin) {
       setLine(els.generalRouteStatus, "Укажите стартовую систему, в которой вы сейчас находитесь.", true);
       return;
     }
@@ -517,6 +601,8 @@
     els.buildGeneralRouteBtn.disabled = true;
     setLine(els.generalRouteStatus, "Сравниваю активные таймеры…", false);
     try {
+      const origin = await requireSystemName(enteredOrigin, els.generalOriginSystem);
+      els.generalOriginSystem.value = origin;
       const timers = await loadTimersForRoutes(readKey);
       const targets = activeRouteTargets(timers);
       if (!targets.length) throw new Error("Нет будущих активных таймеров с указанной системой.");
@@ -822,7 +908,183 @@
     });
   }
 
+  async function loadSystemCatalog() {
+    if (state.systemCatalog.length) return state.systemCatalog;
+    if (state.systemCatalogPromise) return state.systemCatalogPromise;
+    state.systemCatalogPromise = fetch(SYSTEM_CATALOG_URL)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Каталог систем не загрузился: HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        const systems = Array.isArray(payload.systems) ? payload.systems : [];
+        if (!systems.length) throw new Error("Каталог систем пуст.");
+        state.systemCatalog = systems;
+        for (const system of systems) {
+          const normalized = {
+            ...system,
+            id: Number(system.id),
+            x: Number(system.x),
+            y: Number(system.y),
+            security: Number(system.security || 0),
+            neighbors: Array.isArray(system.neighbors) ? system.neighbors.map(Number) : []
+          };
+          state.systemById.set(normalized.id, normalized);
+          state.systemByName.set(normalizeName(normalized.name), normalized);
+          state.nameCache.set(normalizeName(normalized.name), { id: normalized.id, name: normalized.name });
+          state.idNameCache.set(normalized.id, normalized.name);
+        }
+        return state.systemCatalog;
+      });
+    return state.systemCatalogPromise;
+  }
+
+  async function requireSystemName(value, input) {
+    const entered = String(value || "").trim();
+    if (!entered) throw new Error("Укажите систему.");
+    await loadSystemCatalog();
+    const system = state.systemByName.get(normalizeName(entered));
+    if (!system) {
+      if (input) input.classList.add("is-invalid");
+      throw new Error(`Система «${entered}» не найдена. Выберите существующую систему из подсказок.`);
+    }
+    if (input) input.classList.remove("is-invalid");
+    return system.name;
+  }
+
+  function bindSystemAutocomplete(input) {
+    if (!input || input.dataset.systemAutocompleteBound === "1") return;
+    input.dataset.systemAutocompleteBound = "1";
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
+    input.addEventListener("input", () => {
+      input.classList.remove("is-invalid");
+      showSystemSuggestions(input);
+    });
+    input.addEventListener("focus", () => showSystemSuggestions(input));
+    input.addEventListener("keydown", handleSystemSuggestionKeydown);
+    input.addEventListener("blur", () => window.setTimeout(() => {
+      if (state.autocompleteInput === input) hideSystemSuggestions();
+    }, 120));
+  }
+
+  function getSystemSuggestionList() {
+    let list = document.getElementById("systemSuggestionList");
+    if (list) return list;
+    list = document.createElement("div");
+    list.id = "systemSuggestionList";
+    list.className = "system-suggestions";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+    list.addEventListener("mousedown", (event) => {
+      const option = event.target.closest("button[data-suggestion-index]");
+      if (!option) return;
+      event.preventDefault();
+      chooseSystemSuggestion(Number(option.dataset.suggestionIndex));
+    });
+    document.body.appendChild(list);
+    window.addEventListener("resize", positionSystemSuggestionList);
+    window.addEventListener("scroll", positionSystemSuggestionList, true);
+    return list;
+  }
+
+  async function showSystemSuggestions(input) {
+    state.autocompleteInput = input;
+    const term = normalizeName(input.value);
+    if (!term) {
+      hideSystemSuggestions();
+      return;
+    }
+    try {
+      await loadSystemCatalog();
+    } catch (_err) {
+      hideSystemSuggestions();
+      return;
+    }
+    if (state.autocompleteInput !== input) return;
+    const prefix = [];
+    const contains = [];
+    for (const system of state.systemCatalog) {
+      const name = normalizeName(system.name);
+      if (name.startsWith(term)) prefix.push(system);
+      else if (name.includes(term)) contains.push(system);
+      if (prefix.length >= 10) break;
+    }
+    state.autocompleteItems = prefix.concat(contains).slice(0, 10);
+    state.autocompleteIndex = -1;
+    const list = getSystemSuggestionList();
+    if (!state.autocompleteItems.length) {
+      list.innerHTML = '<div class="system-suggestion-empty">Система не найдена</div>';
+    } else {
+      list.innerHTML = state.autocompleteItems.map((system, index) => `
+        <button type="button" role="option" data-suggestion-index="${index}">
+          <strong>${escapeHtml(system.name)}</strong>
+          <span>${formatSecurity(system.security)}</span>
+        </button>
+      `).join("");
+    }
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    positionSystemSuggestionList();
+  }
+
+  function handleSystemSuggestionKeydown(event) {
+    if (state.autocompleteInput !== event.currentTarget || !state.autocompleteItems.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      state.autocompleteIndex = Math.min(state.autocompleteItems.length - 1, state.autocompleteIndex + 1);
+      renderSystemSuggestionSelection();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      state.autocompleteIndex = Math.max(0, state.autocompleteIndex - 1);
+      renderSystemSuggestionSelection();
+    } else if (event.key === "Enter" && state.autocompleteIndex >= 0) {
+      event.preventDefault();
+      chooseSystemSuggestion(state.autocompleteIndex);
+    } else if (event.key === "Escape") {
+      hideSystemSuggestions();
+    }
+  }
+
+  function renderSystemSuggestionSelection() {
+    const list = getSystemSuggestionList();
+    list.querySelectorAll("button[data-suggestion-index]").forEach((option, index) => {
+      option.classList.toggle("is-active", index === state.autocompleteIndex);
+    });
+  }
+
+  function chooseSystemSuggestion(index) {
+    const input = state.autocompleteInput;
+    const system = state.autocompleteItems[index];
+    if (!input || !system) return;
+    input.value = system.name;
+    input.classList.remove("is-invalid");
+    hideSystemSuggestions();
+    input.focus();
+  }
+
+  function positionSystemSuggestionList() {
+    const input = state.autocompleteInput;
+    const list = document.getElementById("systemSuggestionList");
+    if (!input || !list || list.hidden) return;
+    const rect = input.getBoundingClientRect();
+    list.style.left = `${Math.max(8, rect.left)}px`;
+    list.style.top = `${rect.bottom + 4}px`;
+    list.style.width = `${Math.max(220, rect.width)}px`;
+  }
+
+  function hideSystemSuggestions() {
+    const list = document.getElementById("systemSuggestionList");
+    if (state.autocompleteInput) state.autocompleteInput.setAttribute("aria-expanded", "false");
+    if (list) list.hidden = true;
+    state.autocompleteInput = null;
+    state.autocompleteItems = [];
+    state.autocompleteIndex = -1;
+  }
+
   async function resolveSystemNames(names) {
+    await loadSystemCatalog().catch(() => {});
     const uniqueNames = [...new Set(names.map((name) => String(name || "").trim()).filter(Boolean))];
     const missing = uniqueNames.filter((name) => !state.nameCache.has(normalizeName(name)));
     if (missing.length) {
@@ -917,6 +1179,156 @@
       return;
     }
 
+    state.lastMapRoutes = validRoutes;
+    if (state.systemById.size) {
+      renderSpatialRouteMap(validRoutes);
+      return;
+    }
+
+    renderLinearRouteMap(validRoutes);
+    loadSystemCatalog().then(() => {
+      if (state.lastMapRoutes === validRoutes) renderSpatialRouteMap(validRoutes);
+    }).catch(() => {});
+  }
+
+  function renderSpatialRouteMap(routes) {
+    const width = 1400;
+    const height = 760;
+    const padding = 72;
+    const routeIds = new Set();
+    const routeNodeInfo = new Map();
+
+    routes.forEach((route) => {
+      const color = safeColor(route.color);
+      route.nodes.forEach((node, index) => {
+        const id = Number(node.id);
+        if (!state.systemById.has(id)) return;
+        routeIds.add(id);
+        if (!routeNodeInfo.has(id)) {
+          routeNodeInfo.set(id, {
+            id,
+            name: node.name,
+            color,
+            isStart: false,
+            isTarget: false,
+            step: index
+          });
+        }
+        const info = routeNodeInfo.get(id);
+        const isTarget = Boolean(route.targetIds && route.targetIds.has(id));
+        info.isStart = info.isStart || index === 0;
+        info.isTarget = info.isTarget || isTarget;
+        if (isTarget) info.color = color;
+        info.step = Math.min(info.step, index);
+      });
+    });
+
+    const visibleIds = new Set(routeIds);
+    routeIds.forEach((id) => {
+      const system = state.systemById.get(id);
+      if (!system) return;
+      system.neighbors.forEach((neighborId) => {
+        if (state.systemById.has(neighborId)) visibleIds.add(neighborId);
+      });
+    });
+
+    const visibleSystems = [...visibleIds].map((id) => state.systemById.get(id)).filter(Boolean);
+    if (!visibleSystems.length) {
+      renderLinearRouteMap(routes);
+      return;
+    }
+
+    const xValues = visibleSystems.map((system) => system.x);
+    const yValues = visibleSystems.map((system) => system.y);
+    const minX = Math.min(...xValues);
+    const maxX = Math.max(...xValues);
+    const minY = Math.min(...yValues);
+    const maxY = Math.max(...yValues);
+    const rangeX = Math.max(1, maxX - minX);
+    const rangeY = Math.max(1, maxY - minY);
+    const scale = Math.min((width - padding * 2) / rangeX, (height - padding * 2) / rangeY);
+    const usedWidth = rangeX * scale;
+    const usedHeight = rangeY * scale;
+    const offsetX = (width - usedWidth) / 2;
+    const offsetY = (height - usedHeight) / 2;
+    const positions = new Map(visibleSystems.map((system) => [system.id, {
+      x: offsetX + (system.x - minX) * scale,
+      y: offsetY + (maxY - system.y) * scale
+    }]));
+
+    const contextEdges = [];
+    const seenContextEdges = new Set();
+    for (const system of visibleSystems) {
+      for (const neighborId of system.neighbors) {
+        if (!visibleIds.has(neighborId)) continue;
+        if (!routeIds.has(system.id) && !routeIds.has(neighborId)) continue;
+        const key = system.id < neighborId ? `${system.id}:${neighborId}` : `${neighborId}:${system.id}`;
+        if (seenContextEdges.has(key)) continue;
+        seenContextEdges.add(key);
+        const from = positions.get(system.id);
+        const to = positions.get(neighborId);
+        if (from && to) contextEdges.push(`<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>`);
+      }
+    }
+
+    const routeEdges = [];
+    routes.forEach((route) => {
+      const color = safeColor(route.color);
+      for (let index = 1; index < route.nodes.length; index += 1) {
+        const from = positions.get(Number(route.nodes[index - 1].id));
+        const to = positions.get(Number(route.nodes[index].id));
+        if (!from || !to) continue;
+        routeEdges.push(`<line class="route-edge-underlay" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>`);
+        routeEdges.push(`<line class="route-edge" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}"></line>`);
+      }
+    });
+
+    const contextNodes = visibleSystems
+      .filter((system) => !routeIds.has(system.id))
+      .map((system) => {
+        const point = positions.get(system.id);
+        return `<g class="map-context-node" transform="translate(${point.x} ${point.y})">
+          <circle r="2.5" fill="${securityColor(system.security)}"></circle>
+          <title>${escapeHtml(system.name)} (${formatSecurity(system.security)})</title>
+        </g>`;
+      });
+
+    const labelEvery = Math.max(1, Math.ceil(routeNodeInfo.size / 10));
+    const routeNodes = [...routeNodeInfo.values()].map((info) => {
+      const point = positions.get(info.id);
+      const system = state.systemById.get(info.id);
+      if (!point || !system) return "";
+      const showLabel = info.isStart || info.isTarget || routeNodeInfo.size <= 8 || info.step % labelEvery === 0;
+      const classes = ["map-route-node"];
+      if (info.isStart) classes.push("is-start");
+      if (info.isTarget) classes.push("is-target");
+      const meta = info.isStart && info.isTarget ? "старт / таймер" : info.isStart ? "старт" : info.isTarget ? "таймер" : "";
+      const labelAnchor = point.x > width - 150 ? "end" : point.x < 150 ? "start" : "middle";
+      const labelX = labelAnchor === "end" ? -10 : labelAnchor === "start" ? 10 : 0;
+      return `<g class="${classes.join(" ")}" style="--route-color:${info.color}" transform="translate(${point.x} ${point.y})">
+        ${info.isTarget ? `<circle class="route-target-ring" r="15"></circle>` : ""}
+        <circle class="route-core" r="${info.isTarget ? 8 : info.isStart ? 7 : 5}"></circle>
+        <text class="route-system-label ${showLabel ? "" : "is-detail-label"}" x="${labelX}" y="-12" text-anchor="${labelAnchor}">${escapeHtml(system.name)}</text>
+        ${meta ? `<text class="route-node-meta" x="${labelX}" y="22" text-anchor="${labelAnchor}">${meta}</text>` : ""}
+        <title>${escapeHtml(system.name)} (${formatSecurity(system.security)})${meta ? `, ${meta}` : ""}</title>
+      </g>`;
+    });
+
+    state.mapZoom = 1;
+    els.routeMap.innerHTML = `
+      <div class="route-map-stage">
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Карта маршрутов по координатам EVE" preserveAspectRatio="xMidYMid meet">
+          <g class="map-context-edges">${contextEdges.join("")}</g>
+          <g class="map-context-nodes">${contextNodes.join("")}</g>
+          <g class="map-route-edges">${routeEdges.join("")}</g>
+          <g class="map-route-nodes">${routeNodes.join("")}</g>
+        </svg>
+      </div>`;
+    applyRouteZoom();
+  }
+
+  function renderLinearRouteMap(validRoutes) {
+
     const compact = window.matchMedia("(max-width: 560px)").matches;
     const maxNodeCount = Math.max(...validRoutes.map((route) => route.nodes.length));
     const width = compact ? 360 : 1200;
@@ -965,14 +1377,50 @@
       });
     });
 
+    state.mapZoom = 1;
     els.routeMap.innerHTML = `
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Схема маршрутов флотов" preserveAspectRatio="xMidYMid meet">
-        ${edgeParts.join("")}
-        ${nodeParts.join("")}
-      </svg>`;
+      <div class="route-map-stage">
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Схема маршрутов флотов" preserveAspectRatio="xMidYMid meet">
+          ${edgeParts.join("")}
+          ${nodeParts.join("")}
+        </svg>
+      </div>`;
+    applyRouteZoom();
+  }
+
+  function changeRouteZoom(delta) {
+    const previous = state.mapZoom;
+    state.mapZoom = Math.max(1, Math.min(3, Math.round((state.mapZoom + delta) * 100) / 100));
+    if (state.mapZoom === previous) return;
+    const centerX = (els.routeMap.scrollLeft + els.routeMap.clientWidth / 2) / Math.max(1, els.routeMap.scrollWidth);
+    const centerY = (els.routeMap.scrollTop + els.routeMap.clientHeight / 2) / Math.max(1, els.routeMap.scrollHeight);
+    applyRouteZoom();
+    window.requestAnimationFrame(() => {
+      els.routeMap.scrollLeft = centerX * els.routeMap.scrollWidth - els.routeMap.clientWidth / 2;
+      els.routeMap.scrollTop = centerY * els.routeMap.scrollHeight - els.routeMap.clientHeight / 2;
+    });
+  }
+
+  function resetRouteZoom() {
+    state.mapZoom = 1;
+    applyRouteZoom();
+    els.routeMap.scrollTo({ left: 0, top: 0 });
+  }
+
+  function applyRouteZoom() {
+    const stage = els.routeMap.querySelector(".route-map-stage");
+    if (stage) {
+      stage.style.width = `${state.mapZoom * 100}%`;
+      stage.style.height = `${state.mapZoom * 100}%`;
+    }
+    els.routeMap.classList.toggle("is-zoomed", state.mapZoom >= 1.5);
+    els.routeZoomOutBtn.disabled = state.mapZoom <= 1;
+    els.routeZoomInBtn.disabled = state.mapZoom >= 3;
   }
 
   function clearRouteWorkspace(message, clearText = true) {
+    state.lastMapRoutes = null;
+    state.mapZoom = 1;
     els.routeMap.innerHTML = `<div class="route-map-empty">${escapeHtml(message)}</div>`;
     els.routeLegend.innerHTML = "";
     els.routeList.innerHTML = "";
@@ -980,6 +1428,7 @@
       els.routeWorkspaceTitle.textContent = "Операционная карта";
       els.routeWorkspaceHint.textContent = message;
     }
+    applyRouteZoom();
   }
 
   function getAdminKey() {
@@ -1049,6 +1498,19 @@
 
   function safeColor(value) {
     return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : "#27a7d8";
+  }
+
+  function formatSecurity(value) {
+    const security = Number(value || 0);
+    const rounded = security > 0 && security < 0.05 ? 0.1 : Math.round(security * 10) / 10;
+    return rounded.toFixed(1);
+  }
+
+  function securityColor(value) {
+    const security = Number(value || 0);
+    if (security >= 0.5) return "#69aebf";
+    if (security > 0) return "#b9a264";
+    return "#9b6970";
   }
 
   async function mapLimit(items, limit, worker) {

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261024-1" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-2" />
 </head>
 <body>
   <header class="topbar">
@@ -15,7 +15,7 @@
     <nav class="nav">
       <a id="boardTab" class="nav-tab is-active" href="#board">Доска</a>
       <a id="routesTab" class="nav-tab" href="#routes">Маршруты</a>
-      <a href="?admin=1#board">Админ</a>
+      <a id="adminTab" href="?admin=1#board">Админ</a>
       <button id="refreshBtn" class="ghost-btn" type="button">Обновить</button>
     </nav>
   </header>
@@ -251,7 +251,7 @@ Hakatiz - 7-6
         <div class="route-controls">
           <label>
             Стартовая система (где вы сейчас)
-            <input id="generalOriginSystem" type="text" placeholder="например, Hakatiz" />
+            <input id="generalOriginSystem" class="system-autocomplete" type="text" autocomplete="off" placeholder="например, Hakatiz" />
             <span class="field-help">Hakatiz в примере — это точка старта, а не система назначения.</span>
           </label>
           <label>
@@ -295,9 +295,9 @@ Hakatiz - 7-6
         <div class="section-title">
           <div>
             <h2>Управление флотами</h2>
-            <span class="hint">Создание профилей, ключей и общий перерасчёт маршрутов.</span>
+            <span class="hint">Изменённые профили сохраняются автоматически перед расчётом.</span>
           </div>
-          <button id="calculateFleetRoutesBtn" class="primary-btn" type="button">Рассчитать маршруты</button>
+          <button id="calculateFleetRoutesBtn" class="primary-btn" type="button">Сохранить и рассчитать</button>
         </div>
 
         <div class="fleet-create-grid">
@@ -307,7 +307,7 @@ Hakatiz - 7-6
           </label>
           <label>
             Текущая система
-            <input id="newFleetSystem" type="text" placeholder="Hakatiz" />
+            <input id="newFleetSystem" class="system-autocomplete" type="text" autocomplete="off" placeholder="Hakatiz" />
           </label>
           <label>
             Цвет
@@ -340,7 +340,12 @@ Hakatiz - 7-6
             <h2 id="routeWorkspaceTitle">Операционная карта</h2>
             <span id="routeWorkspaceHint" class="hint">Рассчитай общий путь или открой маршрут флота.</span>
           </div>
-          <button id="reloadRouteBtn" class="secondary-btn" type="button">Обновить</button>
+          <div class="map-toolbar">
+            <button id="routeZoomOutBtn" class="map-tool-btn" type="button" title="Уменьшить карту" aria-label="Уменьшить карту">−</button>
+            <button id="routeZoomResetBtn" class="map-tool-btn" type="button" title="Показать маршрут целиком" aria-label="Показать маршрут целиком">⌂</button>
+            <button id="routeZoomInBtn" class="map-tool-btn" type="button" title="Увеличить карту" aria-label="Увеличить карту">+</button>
+            <button id="reloadRouteBtn" class="secondary-btn" type="button">Обновить</button>
+          </div>
         </div>
         <div id="routeMap" class="route-map" aria-label="Карта маршрутов">
           <div class="route-map-empty">Маршрут пока не рассчитан.</div>
@@ -370,7 +375,7 @@ Hakatiz - 7-6
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20261020-4"></script>
-  <script src="js/routes.js?v=20261024-1"></script>
+  <script src="js/app.js?v=20261024-2"></script>
+  <script src="js/routes.js?v=20261024-2"></script>
 </body>
 </html>

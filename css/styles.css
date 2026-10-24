@@ -738,6 +738,10 @@ input.table-input:focus {
   background: rgba(45, 101, 62, 0.14);
 }
 
+.generated-key[hidden] {
+  display: none;
+}
+
 .generated-key code {
   flex: 1;
   overflow-wrap: anywhere;
@@ -775,6 +779,72 @@ input.table-input:focus {
   white-space: nowrap;
 }
 
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.map-tool-btn {
+  display: inline-grid;
+  width: 2.55rem;
+  height: 2.55rem;
+  padding: 0;
+  place-items: center;
+  border-color: var(--border);
+  background: #0a1c28;
+  color: #9fb8c2;
+  font-size: 1.15rem;
+}
+
+.system-suggestions {
+  position: fixed;
+  z-index: 1000;
+  max-height: 19rem;
+  overflow-y: auto;
+  border: 1px solid #36576a;
+  border-radius: 0.45rem;
+  background: #071722;
+  box-shadow: 0 0.8rem 2rem rgba(0, 5, 10, 0.5);
+}
+
+.system-suggestions button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.62rem 0.75rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #a9c0c9;
+  text-align: left;
+  transform: none;
+}
+
+.system-suggestions button:hover,
+.system-suggestions button.is-active {
+  background: #123244;
+  color: #c5d5da;
+  transform: none;
+}
+
+.system-suggestions button span,
+.system-suggestion-empty {
+  color: #7895a2;
+  font-size: 0.8rem;
+}
+
+.system-suggestion-empty {
+  padding: 0.7rem 0.75rem;
+}
+
+input.system-autocomplete.is-invalid {
+  border-color: #a76b6b;
+  box-shadow: 0 0 0 2px rgba(167, 107, 107, 0.18);
+}
+
 .route-workspace {
   min-height: 38rem;
 }
@@ -783,7 +853,7 @@ input.table-input:focus {
   position: relative;
   width: 100%;
   height: clamp(28rem, 58vh, 46rem);
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background:
@@ -791,9 +861,19 @@ input.table-input:focus {
     linear-gradient(90deg, rgba(57, 91, 108, 0.08) 1px, transparent 1px),
     #071722;
   background-size: 32px 32px;
+  scrollbar-color: #42677a #071722;
 }
 
-.route-map svg {
+.route-map-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.route-map svg,
+.route-map-stage svg {
   display: block;
   width: 100%;
   height: 100%;
@@ -813,6 +893,81 @@ input.table-input:focus {
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.68;
+}
+
+.map-context-edges line {
+  stroke: #294657;
+  stroke-width: 1.2;
+  opacity: 0.5;
+}
+
+.map-context-node circle {
+  opacity: 0.72;
+  transition: opacity 0.12s ease, r 0.12s ease;
+}
+
+.map-context-node:hover circle {
+  r: 4;
+  opacity: 1;
+}
+
+.map-route-edges .route-edge-underlay {
+  stroke: #041019;
+  stroke-width: 8;
+  stroke-linecap: round;
+  opacity: 0.88;
+}
+
+.map-route-edges .route-edge {
+  stroke-width: 4;
+  opacity: 0.95;
+}
+
+.map-route-node .route-core {
+  fill: #0a1d29;
+  stroke: var(--route-color, #27a7d8);
+  stroke-width: 2.5;
+}
+
+.map-route-node.is-start .route-core {
+  fill: #c3d2d7;
+  stroke-width: 3;
+}
+
+.map-route-node.is-target .route-core {
+  fill: var(--route-color, #27a7d8);
+  stroke: #d2e0e4;
+  stroke-width: 2;
+}
+
+.route-target-ring {
+  fill: color-mix(in srgb, var(--route-color, #27a7d8) 18%, transparent);
+  stroke: var(--route-color, #27a7d8);
+  stroke-width: 3;
+}
+
+.map-route-node text {
+  fill: #b9cbd1;
+  font-size: 13px;
+  font-weight: 650;
+  paint-order: stroke;
+  stroke: #06131c;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.map-route-node .route-node-meta {
+  fill: #8ca8b2;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.map-route-node .is-detail-label {
+  display: none;
+}
+
+.route-map.is-zoomed .map-route-node .is-detail-label {
+  display: block;
 }
 
 .route-node circle {

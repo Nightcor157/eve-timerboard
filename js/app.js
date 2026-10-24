@@ -95,7 +95,8 @@
     exportCsvBtn: document.getElementById("exportCsvBtn"),
     statActive: document.getElementById("statActive"),
     statSoon: document.getElementById("statSoon"),
-    statEnded: document.getElementById("statEnded")
+    statEnded: document.getElementById("statEnded"),
+    adminTab: document.getElementById("adminTab")
   };
 
   init();
@@ -108,6 +109,9 @@
     if (ADMIN_MODE) {
       els.adminPanel.hidden = false;
       document.querySelectorAll(".admin-only").forEach((el) => { el.hidden = false; });
+      els.adminTab.textContent = "Обычный вид";
+      els.adminTab.href = `${window.location.pathname}#board`;
+      els.adminTab.title = "Выйти из режима администратора";
     }
 
     const savedKey = localStorage.getItem(ADMIN_KEY_STORAGE);
