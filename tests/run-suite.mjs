@@ -10,7 +10,8 @@ const suites = {
     "tests/e2e/routes-access.mjs",
     "tests/e2e/fleet-key.mjs",
     "tests/e2e/general-route.mjs",
-    "tests/e2e/commander-board.mjs"
+    "tests/e2e/commander-board.mjs",
+    "tests/e2e/data-safety.mjs"
   ],
   stress: ["tests/e2e/fleet-routing.stress.mjs"]
 };

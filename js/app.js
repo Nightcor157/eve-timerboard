@@ -62,6 +62,7 @@
   let adminKeyValidated = false;
   let viewAccessGranted = false;
   let boardSort = { key: "end_at", direction: "asc" };
+  let loadGeneration = 0;
 
   const els = {
     configWarning: document.getElementById("configWarning"),
@@ -175,6 +176,10 @@
       }
       loadTimers();
     });
+    els.adminKey.addEventListener("input", () => {
+      adminKeyValidated = false;
+      invalidateTimerLoads();
+    });
     els.rememberViewKey.addEventListener("change", () => {
       if (!els.rememberViewKey.checked) localStorage.removeItem(VIEW_KEY_STORAGE);
       if (els.rememberViewKey.checked && els.viewKey.value.trim()) {
@@ -184,6 +189,7 @@
     els.viewKey.addEventListener("keydown", (event) => {
       if (event.key === "Enter") unlockView();
     });
+    els.viewKey.addEventListener("input", invalidateTimerLoads);
     window.addEventListener("eve-timerboard:fleet-board-access", applyFleetBoardAccess);
     window.addEventListener("eve-timerboard:route-result-updated", applyRouteResultUpdate);
     window.addEventListener("eve-timerboard:request-view-access", () => {
@@ -318,10 +324,11 @@
   }
 
   async function loadTimers() {
+    const requestGeneration = ++loadGeneration;
+    const requestedKey = db ? getReadKey() : "";
     try {
       if (db) {
-        const viewKey = getReadKey();
-        if (!viewKey) {
+        if (!requestedKey) {
           setViewAccessGranted(false);
           timers = [];
           renderTimers();
@@ -331,9 +338,10 @@
 
         const { data, error } = await db.rpc("get_timers", {
           p_board_id: BOARD_ID,
-          p_view_key: viewKey
+          p_view_key: requestedKey
         });
 
+        if (!isCurrentTimerLoad(requestGeneration, requestedKey)) return;
         if (error) throw error;
         setViewAccessGranted(true);
         hideViewGate();
@@ -344,6 +352,7 @@
       }
       renderTimers();
     } catch (err) {
+      if (!isCurrentTimerLoad(requestGeneration, requestedKey)) return;
       const message = friendlyDbError(err);
       if (/ключ просмотра|get_timers|permission|28000|wrong/i.test(message)) {
         setViewAccessGranted(false);
@@ -354,6 +363,14 @@
       }
       setStatus(`Ошибка загрузки: ${message}`, true);
     }
+  }
+
+  function invalidateTimerLoads() {
+    loadGeneration += 1;
+  }
+
+  function isCurrentTimerLoad(requestGeneration, requestedKey) {
+    return requestGeneration === loadGeneration && (!db || requestedKey === getReadKey());
   }
 
   function setViewAccessGranted(granted) {
@@ -484,27 +501,38 @@
 
     els.addBtn.disabled = true;
     try {
+      let addedCount = parsed.length;
       if (db) {
-        for (const timer of parsed) {
-          const { error } = await db.rpc("add_timer", {
-            p_board_id: BOARD_ID,
-            p_admin_key: adminKey,
-            p_raw_text: timer.raw_text,
-            p_title: timer.title,
-            p_system: timer.system,
-            p_object_name: timer.object_name,
-            p_structure: timer.structure,
-            p_owner: timer.owner,
-            p_distance: timer.distance,
-            p_mode: timer.mode,
-            p_end_at: timer.end_at,
-            p_note: timer.note || ""
-          });
-          if (error) throw error;
-        }
+        const payload = parsed.map((timer) => ({
+          raw_text: timer.raw_text || "",
+          title: timer.title || "",
+          system: timer.system || "",
+          object_name: normalizeStructureType(timer.object_name),
+          structure: timer.structure || "",
+          owner: timer.owner || "",
+          distance: normalizeTimerKind(timer.distance),
+          mode: timer.mode || "",
+          end_at: timer.end_at,
+          note: normalizeStructureResult(timer.note)
+        }));
+        const { data, error } = await db.rpc("add_timers", {
+          p_board_id: BOARD_ID,
+          p_admin_key: adminKey,
+          p_timers: payload
+        });
+        if (error) throw error;
+        if (Array.isArray(data)) addedCount = data.length;
+        else if (Number.isFinite(Number(data))) addedCount = Number(data);
       } else {
         const local = readLocalTimers();
-        parsed.forEach((timer) => local.push({ ...timer, id: cryptoRandomId(), board_id: BOARD_ID, created_at: new Date().toISOString() }));
+        const createdAt = new Date().toISOString();
+        parsed.forEach((timer) => local.push({
+          ...timer,
+          id: cryptoRandomId(),
+          board_id: BOARD_ID,
+          created_at: createdAt,
+          updated_at: createdAt
+        }));
         localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
       }
 
@@ -514,7 +542,7 @@
 
       els.timerInput.value = "";
       els.parsePreview.hidden = true;
-      setStatus(`Добавлено таймеров: ${parsed.length}.`, false);
+      setStatus(`Добавлено таймеров: ${addedCount}.`, false);
       await loadTimers();
     } catch (err) {
       setStatus(`Ошибка добавления: ${friendlyDbError(err)}`, true);
@@ -1159,25 +1187,23 @@
 
   async function saveTimerAdminFields(timer, changes) {
     if (!adminViewEnabled) return;
-    const nextEndAt = Object.prototype.hasOwnProperty.call(changes, "end_at") ? parseUtcInput(changes.end_at) : timer.end_at;
-    if (!nextEndAt) {
-      setStatus("Дата должна быть в формате 2026.05.22 13:08:10.", true);
-      await loadTimers();
-      return;
+    const patch = {};
+    for (const [field, value] of Object.entries(changes)) {
+      if (["title", "system", "structure", "owner", "mode"].includes(field)) patch[field] = cleanText(value);
+      else if (field === "object_name") patch[field] = normalizeStructureType(value);
+      else if (field === "distance") patch[field] = normalizeTimerKind(value);
+      else if (field === "note") patch[field] = normalizeStructureResult(value);
+      else if (field === "end_at") {
+        const parsedEndAt = parseUtcInput(value);
+        if (!parsedEndAt) {
+          setStatus("Дата должна быть в формате 2026.05.22 13:08:10.", true);
+          await loadTimers();
+          return;
+        }
+        patch[field] = parsedEndAt;
+      }
     }
-
-    const updated = {
-      ...timer,
-      title: Object.prototype.hasOwnProperty.call(changes, "title") ? cleanText(changes.title) : timer.title,
-      system: Object.prototype.hasOwnProperty.call(changes, "system") ? cleanText(changes.system) : timer.system,
-      object_name: Object.prototype.hasOwnProperty.call(changes, "object_name") ? changes.object_name : normalizeStructureType(timer.object_name),
-      structure: Object.prototype.hasOwnProperty.call(changes, "structure") ? cleanText(changes.structure) : timer.structure,
-      owner: Object.prototype.hasOwnProperty.call(changes, "owner") ? cleanText(changes.owner) : timer.owner,
-      distance: Object.prototype.hasOwnProperty.call(changes, "distance") ? changes.distance : normalizeTimerKind(timer.distance),
-      mode: Object.prototype.hasOwnProperty.call(changes, "mode") ? cleanText(changes.mode) : timer.mode,
-      end_at: nextEndAt,
-      note: Object.prototype.hasOwnProperty.call(changes, "note") ? changes.note : normalizeStructureResult(timer.note)
-    };
+    if (!Object.keys(patch).length) return;
 
     try {
       if (db) {
@@ -1188,45 +1214,45 @@
           return;
         }
 
-        const { error } = await db.rpc("update_timer_admin_fields", {
+        const { data, error } = await db.rpc("patch_timer_admin_fields", {
           p_board_id: BOARD_ID,
           p_admin_key: adminKey,
           p_id: timer.id,
-          p_title: updated.title || "",
-          p_system: updated.system || "",
-          p_object_name: normalizeStructureType(updated.object_name),
-          p_structure: updated.structure || "",
-          p_owner: updated.owner || "",
-          p_timer_kind: normalizeTimerKind(updated.distance),
-          p_mode: updated.mode || "",
-          p_end_at: updated.end_at,
-          p_note: normalizeStructureResult(updated.note)
+          p_changes: patch,
+          p_expected_updated_at: timer.updated_at
         });
         if (error) throw error;
+        if (!data) throw new Error("patch_timer_admin_fields returned no timer");
+        const serverTimer = normalizeTimer(data);
+        timers = timers.map((item) => item.id === timer.id ? serverTimer : item);
       } else {
-        const local = readLocalTimers().map((item) => item.id === timer.id ? {
+        let localTimer = null;
+        const local = readLocalTimers().map((item) => item.id === timer.id ? (localTimer = {
           ...item,
-          title: updated.title || "",
-          system: updated.system || "",
-          object_name: normalizeStructureType(updated.object_name),
-          structure: updated.structure || "",
-          owner: updated.owner || "",
-          distance: normalizeTimerKind(updated.distance),
-          mode: updated.mode || "",
-          end_at: updated.end_at,
-          note: normalizeStructureResult(updated.note),
+          ...patch,
           updated_at: new Date().toISOString()
-        } : item);
+        }) : item);
         localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+        if (localTimer) timers = timers.map((item) => item.id === timer.id ? normalizeTimer(localTimer) : item);
       }
 
       setStatus("Таймер обновлён.", false);
       lastRenderedSignature = "";
-      await loadTimers();
+      renderTimers();
     } catch (err) {
+      if (isTimerUpdateConflict(err)) {
+        setStatus("Таймер уже был изменён. Данные обновлены, повторите правку при необходимости.", true);
+        await loadTimers();
+        return;
+      }
       setStatus(`Ошибка обновления: ${friendlyDbError(err)}`, true);
       await loadTimers();
     }
+  }
+
+  function isTimerUpdateConflict(err) {
+    const message = err && (err.message || err.details) ? `${err.message || ""} ${err.details || ""}` : String(err || "");
+    return err?.code === "40001" || /timer update conflict/i.test(message);
   }
 
   function normalizeTimerKind(value) {
@@ -1511,8 +1537,11 @@
     if (/view key is not configured/i.test(message)) return "ключ просмотра ещё не настроен";
     if (/set_timerboard_view_key/i.test(message)) return "в Supabase нужно выполнить SQL для ключа просмотра";
     if (/get_timers/i.test(message)) return "в Supabase нужно выполнить SQL для ключа просмотра";
-    if (/wrong admin key|28000|invalid/i.test(message)) return "неверный админ-ключ";
+    if (/wrong admin key|28000/i.test(message)) return "неверный админ-ключ";
     if (/clear_timer_history/i.test(message)) return "в Supabase нужно обновить полную схему из supabase/schema.sql";
+    if (/add_timers|patch_timer_admin_fields/i.test(message) && /function|schema cache|does not exist/i.test(message)) {
+      return "в Supabase нужно выполнить обновлённый файл supabase/schema.sql";
+    }
     if (/update_timer_admin_fields/i.test(message)) return "в Supabase нужно добавить функцию update_timer_admin_fields";
     if (/function .* does not exist|schema cache|add_timer/i.test(message)) return "SQL-схема Supabase не установлена или не обновлена";
     return message;
