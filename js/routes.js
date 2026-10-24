@@ -12,7 +12,7 @@
   const MAP_HEIGHT_KEY = `eve_timerboard_route_map_height_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
   const MAP_MIN_ZOOM = 1;
-  const MAP_MAX_ZOOM = 8;
+  const MAP_MAX_ZOOM = 16;
   const MAP_REGION_SYSTEM_LIMIT = 900;
   let viewAccessGranted = document.body.classList.contains("has-view-access");
 
@@ -49,12 +49,14 @@
     autocompleteItems: [],
     autocompleteIndex: -1,
     mapZoom: 1,
+    mapViewX: 0,
+    mapViewY: 0,
     mapSignature: "",
     mapDrag: null,
     mapResize: null,
     mapViewByMode: {
-      general: { signature: "", zoom: 1, scrollLeft: 0, scrollTop: 0 },
-      fleet: { signature: "", zoom: 1, scrollLeft: 0, scrollTop: 0 }
+      general: { signature: "", zoom: 1, viewX: 0, viewY: 0 },
+      fleet: { signature: "", zoom: 1, viewX: 0, viewY: 0 }
     },
     lastMapRoutes: null,
     loadingFleets: false
@@ -158,12 +160,14 @@
     els.routeMap.addEventListener("pointermove", moveRouteMapPan);
     els.routeMap.addEventListener("pointerup", stopRouteMapPan);
     els.routeMap.addEventListener("pointercancel", stopRouteMapPan);
-    els.routeMap.addEventListener("scroll", saveRouteViewport, { passive: true });
     els.routeMapResizeHandle.addEventListener("pointerdown", startRouteMapResize);
     els.routeMapResizeHandle.addEventListener("pointermove", moveRouteMapResize);
     els.routeMapResizeHandle.addEventListener("pointerup", stopRouteMapResize);
     els.routeMapResizeHandle.addEventListener("pointercancel", stopRouteMapResize);
     els.routeMapResizeHandle.addEventListener("keydown", handleRouteMapResizeKeydown);
+    window.addEventListener("resize", () => {
+      if (!els.routesView.hidden && els.routeMap.querySelector(".route-map-stage svg")) applyRouteZoom();
+    }, { passive: true });
 
     els.createFleetBtn.addEventListener("click", createFleet);
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
@@ -777,7 +781,13 @@
       const allRouteIds = [...new Set(candidates.flatMap((candidate) => candidate.routeIds))];
       const names = await resolveIdsToNames(allRouteIds);
       const nodes = [];
+      const segments = [];
       for (const candidate of candidates) {
+        const segment = candidate.routeIds.map((id) => ({
+          id: Number(id),
+          name: names.get(Number(id)) || String(id)
+        }));
+        segments.push(segment);
         for (const id of candidate.routeIds) {
           if (!nodes.length || nodes[nodes.length - 1].id !== Number(id)) {
             nodes.push({ id: Number(id), name: names.get(Number(id)) || String(id) });
@@ -798,6 +808,7 @@
           name: `${origin} → ${candidates[candidates.length - 1].timer.system}`,
           color: "#27a7d8",
           nodes,
+          segments,
           targetIds: new Set(candidates.map((candidate) => Number(candidate.targetSystem.id)))
         }]
       };
@@ -966,22 +977,31 @@
 
     const routes = [...groups.values()].map((group) => {
       const nodes = [];
-      const seenSequence = [];
-      for (const row of group.rows.sort((a, b) => a.route_order - b.route_order)) {
+      const segments = [];
+      const activeRows = group.rows
+        .slice()
+        .sort((a, b) => a.route_order - b.route_order)
+        .filter((row) => !normalizeResult(row.result));
+      for (const row of activeRows) {
         const segment = Array.isArray(row.route_nodes) ? row.route_nodes : [];
+        const normalizedSegment = [];
         for (const node of segment) {
           const normalized = { id: Number(node.id), name: String(node.name || node.id) };
-          if (!seenSequence.length || seenSequence[seenSequence.length - 1].id !== normalized.id) {
-            seenSequence.push(normalized);
+          if (!normalizedSegment.length || normalizedSegment[normalizedSegment.length - 1].id !== normalized.id) {
+            normalizedSegment.push(normalized);
+          }
+          if (!nodes.length || nodes[nodes.length - 1].id !== normalized.id) {
+            nodes.push(normalized);
           }
         }
+        if (normalizedSegment.length) segments.push(normalizedSegment);
       }
-      nodes.push(...seenSequence);
       return {
         name: group.name,
         color: group.color,
         nodes,
-        targetIds: new Set(group.rows.map((row) => {
+        segments,
+        targetIds: new Set(activeRows.map((row) => {
           const segment = Array.isArray(row.route_nodes) ? row.route_nodes : [];
           const last = segment[segment.length - 1];
           return last ? Number(last.id) : -1;
@@ -996,7 +1016,8 @@
         ${escapeHtml(group.name)}
       </span>
     `).join("");
-    els.routeWorkspaceHint.textContent = `Назначено целей: ${rows.length}.`;
+    const activeCount = rows.filter((row) => !normalizeResult(row.result)).length;
+    els.routeWorkspaceHint.textContent = `Назначено целей: ${rows.length}. На карте осталось: ${activeCount}.`;
     renderFleetRouteRows(rows);
   }
 
@@ -1613,7 +1634,7 @@
   function renderRouteMap(routes) {
     const validRoutes = routes.filter((route) => Array.isArray(route.nodes) && route.nodes.length);
     if (!validRoutes.length) {
-      clearRouteWorkspace("В маршруте нет систем.", false);
+      clearRouteWorkspace("Активных участков маршрута не осталось.", false);
       return;
     }
 
@@ -1625,7 +1646,7 @@
     const savedView = state.mapViewByMode[state.mapMode];
     const viewport = savedView.signature === state.mapSignature
       ? { ...savedView }
-      : { signature: state.mapSignature, zoom: 1, scrollLeft: 0, scrollTop: 0 };
+      : { signature: state.mapSignature, zoom: 1, viewX: 0, viewY: 0 };
     if (state.systemById.size) {
       renderSpatialRouteMap(validRoutes, viewport);
       return;
@@ -1640,8 +1661,18 @@
   function createRouteMapSignature(routes) {
     return routes.map((route) => {
       const targets = route.targetIds ? [...route.targetIds].map(Number).sort((a, b) => a - b) : [];
-      return `${route.name || "route"}:${route.nodes.map((node) => Number(node.id)).join(",")}:${targets.join(",")}`;
+      const segments = getRouteSegments(route)
+        .map((segment) => segment.map((node) => Number(node.id)).join(","))
+        .join(";");
+      return `${route.name || "route"}:${segments}:${targets.join(",")}`;
     }).join("|");
+  }
+
+  function getRouteSegments(route) {
+    if (Array.isArray(route.segments)) {
+      return route.segments.filter((segment) => Array.isArray(segment) && segment.length);
+    }
+    return Array.isArray(route.nodes) && route.nodes.length ? [route.nodes] : [];
   }
 
   function renderSpatialRouteMap(routes, viewport) {
@@ -1724,12 +1755,16 @@
     const routeEdges = [];
     routes.forEach((route) => {
       const color = safeColor(route.color);
-      for (let index = 1; index < route.nodes.length; index += 1) {
-        const from = positions.get(Number(route.nodes[index - 1].id));
-        const to = positions.get(Number(route.nodes[index].id));
-        if (!from || !to) continue;
-        routeEdges.push(`<line class="route-edge" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}"></line>`);
-      }
+      getRouteSegments(route).forEach((segment) => {
+        for (let index = 1; index < segment.length; index += 1) {
+          const fromId = Number(segment[index - 1].id);
+          const toId = Number(segment[index].id);
+          const from = positions.get(fromId);
+          const to = positions.get(toId);
+          if (!from || !to) continue;
+          routeEdges.push(`<line class="route-edge" data-from-id="${fromId}" data-to-id="${toId}" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}"></line>`);
+        }
+      });
     });
 
     const contextNodes = visibleSystems
@@ -1767,7 +1802,7 @@
     els.routeMap.classList.add("has-map");
     els.routeMap.innerHTML = `
       <div class="route-map-stage" data-region-count="${includedRegions.size}" data-system-count="${visibleSystems.length}">
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Карта маршрутов по координатам EVE" preserveAspectRatio="xMidYMid meet">
+        <svg viewBox="0 0 ${width} ${height}" data-base-view-box="0 0 ${width} ${height}" role="img" aria-label="Карта маршрутов по координатам EVE" preserveAspectRatio="xMidYMid meet">
           <g class="map-context-edges">${contextEdges.join("")}</g>
           <g class="map-context-nodes">${contextNodes.join("")}</g>
           <g class="map-route-edges">${routeEdges.join("")}</g>
@@ -1853,12 +1888,18 @@
           ? 60 + (height - 120) * (count === 1 ? 0.5 : index / (count - 1))
           : y + (index % 2 === 0 ? -12 : 12)
       }));
+      const positionById = new Map(positions.map((node) => [Number(node.id), node]));
 
-      for (let index = 1; index < positions.length; index += 1) {
-        const from = positions[index - 1];
-        const to = positions[index];
-        edgeParts.push(`<path class="route-edge" d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="${color}" />`);
-      }
+      getRouteSegments(route).forEach((segment) => {
+        for (let index = 1; index < segment.length; index += 1) {
+          const fromId = Number(segment[index - 1].id);
+          const toId = Number(segment[index].id);
+          const from = positionById.get(fromId);
+          const to = positionById.get(toId);
+          if (!from || !to) continue;
+          edgeParts.push(`<path class="route-edge" data-from-id="${fromId}" data-to-id="${toId}" d="M ${from.x} ${from.y} L ${to.x} ${to.y}" stroke="${color}" />`);
+        }
+      });
 
       positions.forEach((node, index) => {
         const isTarget = route.targetIds && route.targetIds.has(Number(node.id));
@@ -1880,7 +1921,7 @@
     els.routeMap.classList.add("has-map");
     els.routeMap.innerHTML = `
       <div class="route-map-stage">
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Схема маршрутов флотов" preserveAspectRatio="xMidYMid meet">
+        <svg viewBox="0 0 ${width} ${height}" data-base-view-box="0 0 ${width} ${height}" role="img" aria-label="Схема маршрутов флотов" preserveAspectRatio="xMidYMid meet">
           ${edgeParts.join("")}
           ${nodeParts.join("")}
         </svg>
@@ -1900,27 +1941,28 @@
 
   function setRouteZoom(value, clientX, clientY) {
     const stage = els.routeMap.querySelector(".route-map-stage");
-    if (!stage) return;
+    const svg = stage && stage.querySelector("svg");
+    if (!svg) return;
     const nextZoom = normalizeMapZoom(value);
     if (nextZoom === state.mapZoom) return;
 
     const rect = els.routeMap.getBoundingClientRect();
-    const anchorX = Number.isFinite(clientX)
-      ? Math.max(0, Math.min(els.routeMap.clientWidth, clientX - rect.left))
-      : els.routeMap.clientWidth / 2;
-    const anchorY = Number.isFinite(clientY)
-      ? Math.max(0, Math.min(els.routeMap.clientHeight, clientY - rect.top))
-      : els.routeMap.clientHeight / 2;
-    const ratioX = (els.routeMap.scrollLeft + anchorX) / Math.max(1, els.routeMap.scrollWidth);
-    const ratioY = (els.routeMap.scrollTop + anchorY) / Math.max(1, els.routeMap.scrollHeight);
+    const ratioX = Number.isFinite(clientX)
+      ? Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)))
+      : 0.5;
+    const ratioY = Number.isFinite(clientY)
+      ? Math.max(0, Math.min(1, (clientY - rect.top) / Math.max(1, rect.height)))
+      : 0.5;
+    const currentView = getVisibleMapViewport(svg, state.mapZoom);
+    const anchorWorldX = currentView.x + currentView.width * ratioX;
+    const anchorWorldY = currentView.y + currentView.height * ratioY;
+    const nextView = getVisibleMapViewport(svg, nextZoom);
 
     state.mapZoom = nextZoom;
+    state.mapViewX = anchorWorldX - nextView.width * ratioX;
+    state.mapViewY = anchorWorldY - nextView.height * ratioY;
     applyRouteZoom();
-    window.requestAnimationFrame(() => {
-      els.routeMap.scrollLeft = ratioX * els.routeMap.scrollWidth - anchorX;
-      els.routeMap.scrollTop = ratioY * els.routeMap.scrollHeight - anchorY;
-      saveRouteViewport();
-    });
+    saveRouteViewport();
   }
 
   function normalizeMapZoom(value) {
@@ -1936,8 +1978,9 @@
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-      scrollLeft: els.routeMap.scrollLeft,
-      scrollTop: els.routeMap.scrollTop
+      viewX: state.mapViewX,
+      viewY: state.mapViewY,
+      viewport: getVisibleMapViewport(els.routeMap.querySelector("svg"), state.mapZoom)
     };
     els.routeMap.classList.add("is-panning");
     els.routeMap.setPointerCapture(event.pointerId);
@@ -1946,8 +1989,10 @@
 
   function moveRouteMapPan(event) {
     if (!state.mapDrag || state.mapDrag.pointerId !== event.pointerId) return;
-    els.routeMap.scrollLeft = state.mapDrag.scrollLeft - (event.clientX - state.mapDrag.x);
-    els.routeMap.scrollTop = state.mapDrag.scrollTop - (event.clientY - state.mapDrag.y);
+    const viewport = state.mapDrag.viewport;
+    state.mapViewX = state.mapDrag.viewX - (event.clientX - state.mapDrag.x) * viewport.width / Math.max(1, els.routeMap.clientWidth);
+    state.mapViewY = state.mapDrag.viewY - (event.clientY - state.mapDrag.y) * viewport.height / Math.max(1, els.routeMap.clientHeight);
+    applyRouteViewBox();
     event.preventDefault();
   }
 
@@ -1984,6 +2029,7 @@
     if (!state.mapResize || state.mapResize.pointerId !== event.pointerId) return;
     const height = clampRouteMapHeight(state.mapResize.height + event.clientY - state.mapResize.y);
     els.routeMap.style.height = `${height}px`;
+    applyRouteZoom();
     event.preventDefault();
   }
 
@@ -2003,6 +2049,7 @@
     const step = event.shiftKey ? 100 : 40;
     const height = clampRouteMapHeight(els.routeMap.getBoundingClientRect().height + direction * step);
     els.routeMap.style.height = `${height}px`;
+    applyRouteZoom();
     localStorage.setItem(MAP_HEIGHT_KEY, String(Math.round(height)));
     event.preventDefault();
   }
@@ -2013,21 +2060,31 @@
 
   function resetRouteZoom() {
     state.mapZoom = MAP_MIN_ZOOM;
+    state.mapViewX = 0;
+    state.mapViewY = 0;
     applyRouteZoom();
-    els.routeMap.scrollTo({ left: 0, top: 0 });
     saveRouteViewport();
   }
 
   function applyRouteZoom() {
     const stage = els.routeMap.querySelector(".route-map-stage");
     if (stage) {
-      stage.style.width = `${state.mapZoom * 100}%`;
-      stage.style.height = `${state.mapZoom * 100}%`;
+      stage.style.width = "100%";
+      stage.style.height = "100%";
+      stage.dataset.zoom = String(state.mapZoom);
     }
     const svg = stage && stage.querySelector("svg");
-    const viewBox = svg && svg.viewBox ? svg.viewBox.baseVal : null;
-    const fitScale = viewBox && viewBox.width && viewBox.height
-      ? Math.max(0.05, Math.min(els.routeMap.clientWidth / viewBox.width, els.routeMap.clientHeight / viewBox.height))
+    if (svg) {
+      svg.style.width = "100%";
+      svg.style.height = "100%";
+      svg.style.removeProperty("transform");
+      svg.style.removeProperty("transform-origin");
+    }
+    const baseView = getBaseMapViewport(svg);
+    const mapWidth = els.routeMap.clientWidth || (baseView && baseView.baseWidth) || 1;
+    const mapHeight = els.routeMap.clientHeight || (baseView && baseView.baseHeight) || 1;
+    const fitScale = baseView && baseView.baseWidth && baseView.baseHeight
+      ? Math.max(0.05, Math.min(mapWidth / baseView.baseWidth, mapHeight / baseView.baseHeight))
       : 1;
     const zoomProgress = (state.mapZoom - MAP_MIN_ZOOM) / (MAP_MAX_ZOOM - MAP_MIN_ZOOM);
     const viewportCompensation = 1 + Math.max(0, 1 / fitScale - 1) * zoomProgress;
@@ -2047,6 +2104,57 @@
     els.routeMap.classList.toggle("is-zoomed", state.mapZoom >= 1.5);
     els.routeZoomOutBtn.disabled = state.mapZoom <= MAP_MIN_ZOOM;
     els.routeZoomInBtn.disabled = state.mapZoom >= MAP_MAX_ZOOM;
+    applyRouteViewBox();
+  }
+
+  function getBaseMapViewport(svg) {
+    if (!svg) return null;
+    const values = String(svg.dataset.baseViewBox || "").trim().split(/\s+/).map(Number);
+    if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) return null;
+    const [baseX, baseY, baseWidth, baseHeight] = values;
+    const mapWidth = els.routeMap.clientWidth || baseWidth;
+    const mapHeight = els.routeMap.clientHeight || baseHeight;
+    const containerAspect = Math.max(0.01, mapWidth / Math.max(1, mapHeight));
+    const baseAspect = baseWidth / Math.max(1, baseHeight);
+    let width = baseWidth;
+    let height = baseHeight;
+    if (containerAspect > baseAspect) {
+      width = baseHeight * containerAspect;
+    } else {
+      height = baseWidth / containerAspect;
+    }
+    return {
+      x: baseX - (width - baseWidth) / 2,
+      y: baseY - (height - baseHeight) / 2,
+      width,
+      height,
+      baseWidth,
+      baseHeight
+    };
+  }
+
+  function getVisibleMapViewport(svg, zoom = state.mapZoom) {
+    const base = getBaseMapViewport(svg) || { x: 0, y: 0, width: 1, height: 1 };
+    const normalizedZoom = normalizeMapZoom(zoom);
+    const width = base.width / normalizedZoom;
+    const height = base.height / normalizedZoom;
+    const maxX = base.x + base.width - width;
+    const maxY = base.y + base.height - height;
+    return {
+      x: Math.max(base.x, Math.min(maxX, Number(state.mapViewX) || 0)),
+      y: Math.max(base.y, Math.min(maxY, Number(state.mapViewY) || 0)),
+      width,
+      height
+    };
+  }
+
+  function applyRouteViewBox() {
+    const svg = els.routeMap.querySelector(".route-map-stage svg");
+    if (!svg) return;
+    const viewport = getVisibleMapViewport(svg, state.mapZoom);
+    state.mapViewX = viewport.x;
+    state.mapViewY = viewport.y;
+    svg.setAttribute("viewBox", `${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`);
   }
 
   function saveRouteViewport() {
@@ -2054,26 +2162,24 @@
     state.mapViewByMode[state.mapMode] = {
       signature: state.mapSignature,
       zoom: state.mapZoom,
-      scrollLeft: els.routeMap.scrollLeft,
-      scrollTop: els.routeMap.scrollTop
+      viewX: state.mapViewX,
+      viewY: state.mapViewY
     };
   }
 
   function restoreRouteViewport(viewport) {
     const view = viewport || {};
     state.mapZoom = normalizeMapZoom(view.zoom);
+    state.mapViewX = Number(view.viewX) || 0;
+    state.mapViewY = Number(view.viewY) || 0;
     state.mapViewByMode[state.mapMode] = {
       signature: state.mapSignature,
       zoom: state.mapZoom,
-      scrollLeft: Number(view.scrollLeft) || 0,
-      scrollTop: Number(view.scrollTop) || 0
+      viewX: state.mapViewX,
+      viewY: state.mapViewY
     };
     applyRouteZoom();
-    window.requestAnimationFrame(() => {
-      els.routeMap.scrollLeft = Number(view.scrollLeft) || 0;
-      els.routeMap.scrollTop = Number(view.scrollTop) || 0;
-      saveRouteViewport();
-    });
+    saveRouteViewport();
   }
 
   function clearRouteWorkspace(message, clearText = true) {
