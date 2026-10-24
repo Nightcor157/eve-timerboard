@@ -33,6 +33,7 @@
     fleets: [],
     adminFleets: [],
     routeRows: [],
+    hiddenFleetIds: new Set(),
     selectedFleetId: "",
     selectedFleetKey: "",
     boardAccessFleetId: "",
@@ -177,6 +178,7 @@
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
     els.copyFleetKeyBtn.addEventListener("click", copyGeneratedFleetKey);
     els.fleetProfilesList.addEventListener("click", handleFleetProfileAction);
+    els.routeLegend.addEventListener("change", handleRouteLegendChange);
     els.routeList.addEventListener("click", handleRouteListClick);
     els.routeList.addEventListener("keydown", handleRouteListKeydown);
     window.setInterval(updateRouteCountdowns, 1000);
@@ -968,16 +970,23 @@
 
     const groups = new Map();
     for (const row of rows) {
-      if (!groups.has(row.fleet_id)) {
-        groups.set(row.fleet_id, {
-          id: row.fleet_id,
+      const fleetId = String(row.fleet_id);
+      if (!groups.has(fleetId)) {
+        groups.set(fleetId, {
+          id: fleetId,
           name: row.fleet_name,
           color: row.fleet_color || "#27a7d8",
           rows: []
         });
       }
-      groups.get(row.fleet_id).rows.push(row);
+      groups.get(fleetId).rows.push(row);
     }
+
+    const currentFleetIds = new Set(groups.keys());
+    for (const fleetId of state.hiddenFleetIds) {
+      if (!currentFleetIds.has(fleetId)) state.hiddenFleetIds.delete(fleetId);
+    }
+    const fleetFilterEnabled = groups.size > 1;
 
     const routes = [...groups.values()].map((group) => {
       const nodes = [];
@@ -1001,6 +1010,7 @@
         if (normalizedSegment.length) segments.push(normalizedSegment);
       }
       return {
+        id: group.id,
         name: group.name,
         color: group.color,
         nodes,
@@ -1013,16 +1023,39 @@
       };
     });
 
-    renderRouteMap(routes);
+    const visibleRoutes = fleetFilterEnabled
+      ? routes.filter((route) => !state.hiddenFleetIds.has(route.id))
+      : routes;
+    renderRouteMap(
+      visibleRoutes,
+      visibleRoutes.length ? "Активных участков маршрута не осталось." : "Все флоты скрыты фильтром."
+    );
     els.routeLegend.innerHTML = [...groups.values()].map((group) => `
-      <span class="route-legend-item">
+      ${fleetFilterEnabled ? `<label class="route-legend-item route-legend-filter" title="Показать или скрыть флот «${escapeHtml(group.name)}» на карте">
+        <input class="route-legend-toggle" type="checkbox" data-fleet-visibility="${escapeHtml(group.id)}" ${state.hiddenFleetIds.has(group.id) ? "" : "checked"} aria-label="Показывать флот «${escapeHtml(group.name)}» на карте" />` : '<span class="route-legend-item">'}
         <span class="route-legend-swatch" style="--fleet-color:${safeColor(group.color)}"></span>
-        ${escapeHtml(group.name)}
-      </span>
+        <span class="route-legend-name">${escapeHtml(group.name)}</span>
+      ${fleetFilterEnabled ? "</label>" : "</span>"}
     `).join("");
     const activeCount = rows.filter((row) => !normalizeResult(row.result)).length;
-    els.routeWorkspaceHint.textContent = `Назначено целей: ${rows.length}. На карте осталось: ${activeCount}.`;
+    const visibleFleetIds = new Set(visibleRoutes.map((route) => route.id));
+    const visibleActiveCount = rows.filter((row) =>
+      !normalizeResult(row.result) && visibleFleetIds.has(String(row.fleet_id))
+    ).length;
+    els.routeWorkspaceHint.textContent = state.hiddenFleetIds.size && fleetFilterEnabled
+      ? `Назначено целей: ${rows.length}. На карте показано: ${visibleActiveCount} из ${activeCount} активных.`
+      : `Назначено целей: ${rows.length}. На карте осталось: ${activeCount}.`;
     renderFleetRouteRows(rows);
+  }
+
+  function handleRouteLegendChange(event) {
+    const toggle = event.target.closest("input[data-fleet-visibility]");
+    if (!toggle || state.mapMode !== "fleet") return;
+    const fleetId = String(toggle.dataset.fleetVisibility || "");
+    if (!fleetId) return;
+    if (toggle.checked) state.hiddenFleetIds.delete(fleetId);
+    else state.hiddenFleetIds.add(fleetId);
+    renderFleetRoutes(state.routeRows, els.routeWorkspaceTitle.textContent || "Все флоты");
   }
 
   function renderFleetRouteRows(rows) {
@@ -1717,10 +1750,10 @@
     }
   }
 
-  function renderRouteMap(routes) {
+  function renderRouteMap(routes, emptyMessage = "Активных участков маршрута не осталось.") {
     const validRoutes = routes.filter((route) => Array.isArray(route.nodes) && route.nodes.length);
     if (!validRoutes.length) {
-      clearRouteWorkspace("Активных участков маршрута не осталось.", false);
+      renderEmptyRouteMap(emptyMessage);
       return;
     }
 
@@ -1742,6 +1775,18 @@
     loadSystemCatalog().then(() => {
       if (state.lastMapRoutes === validRoutes) renderSpatialRouteMap(validRoutes, viewport);
     }).catch(() => {});
+  }
+
+  function renderEmptyRouteMap(message) {
+    if (state.mapViewByMode[state.mapMode].signature === state.mapSignature) {
+      saveRouteViewport();
+    }
+    state.lastMapRoutes = null;
+    state.mapSignature = "";
+    state.mapZoom = MAP_MIN_ZOOM;
+    state.mapDrag = null;
+    els.routeMap.classList.remove("has-map", "is-panning", "is-zoomed");
+    els.routeMap.innerHTML = `<div class="route-map-empty">${escapeHtml(message)}</div>`;
   }
 
   function createRouteMapSignature(routes) {

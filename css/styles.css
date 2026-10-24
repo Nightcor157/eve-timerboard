@@ -1314,11 +1314,48 @@ input.system-autocomplete.is-invalid {
   color: #91aab5;
 }
 
+.route-legend-filter {
+  position: relative;
+  padding: 0.2rem 0.25rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.route-legend-filter:hover {
+  background: #102938;
+}
+
+.route-legend-toggle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
 .route-legend-swatch {
+  flex: 0 0 0.8rem;
   width: 0.8rem;
   height: 0.8rem;
   border-radius: 0.18rem;
   background: var(--fleet-color, #27a7d8);
+  border: 1px solid transparent;
+  transition: opacity 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.route-legend-toggle:focus-visible + .route-legend-swatch {
+  box-shadow: 0 0 0 2px #07131d, 0 0 0 4px #608b9d;
+}
+
+.route-legend-toggle:not(:checked) + .route-legend-swatch {
+  background: transparent;
+  border-color: var(--fleet-color, #608b9d);
+  opacity: 0.45;
+}
+
+.route-legend-toggle:not(:checked) ~ .route-legend-name {
+  color: #607d89;
+  text-decoration: line-through;
 }
 
 .route-list {
