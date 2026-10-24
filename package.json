@@ -5,8 +5,9 @@
   "description": "Static EVE Online timer board with Supabase storage and fleet routing.",
   "type": "module",
   "scripts": {
-    "test": "npm run test:syntax && npm run test:contracts && npm run test:database && npm run test:e2e && npm run test:e2e:stress",
+    "test": "npm run test:syntax && npm run test:unit && npm run test:contracts && npm run test:database && npm run test:e2e && npm run test:e2e:stress",
     "test:syntax": "node tests/check-syntax.mjs",
+    "test:unit": "node --test \"tests/unit/*.test.mjs\"",
     "test:contracts": "node tests/check-sql-contract.mjs",
     "test:database": "node tests/check-database.mjs",
     "test:e2e": "node tests/run-suite.mjs smoke",

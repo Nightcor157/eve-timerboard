@@ -260,6 +260,7 @@ npx playwright install chromium
 
 ```powershell
 npm run test:syntax      # синтаксис всех JS/MJS-файлов
+npm run test:unit        # парсер, жизненный цикл, маршруты и сервисы
 npm run test:contracts   # обязательные SQL-контракты
 npm run test:database    # полная схема в PostgreSQL WASM
 npm run test:e2e         # короткие браузерные сценарии

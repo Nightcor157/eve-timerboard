@@ -1,3 +1,22 @@
+import {
+  STRUCTURE_RESULT_OPTIONS,
+  STRUCTURE_TYPE_OPTIONS,
+  TIMER_KIND_OPTIONS
+} from "./core/constants.js";
+import { parseTimerInput } from "./core/timer-parser.js";
+import { getTimerState, isWithinCompletedWindow } from "./core/timer-rules.js";
+import { getTimerboardApi, hasSupabaseConfig as isSupabaseConfigured } from "./services/supabase-api.js";
+import {
+  cleanText,
+  compareText,
+  escapeHtml,
+  formatUtc,
+  normalizeStructureResult,
+  normalizeStructureType,
+  normalizeTimerKind,
+  parseUtcInput
+} from "./shared/format.js";
+
 (function () {
   "use strict";
 
@@ -8,52 +27,8 @@
   const LOCAL_KEY = `eve_timerboard_${BOARD_ID}`;
   const ADMIN_KEY_STORAGE = `eve_timerboard_admin_key_${BOARD_ID}`;
   const VIEW_KEY_STORAGE = `eve_timerboard_view_key_${BOARD_ID}`;
-  const STRUCTURE_TYPE_OPTIONS = [
-    ["", "—"],
-    ["Astrahus", "Astrahus"],
-    ["Fortizar", "Fortizar"],
-    ["Keepstar", "Keepstar"],
-    ["Raitaru", "Raitaru"],
-    ["Azbel", "Azbel"],
-    ["Sotiyo", "Sotiyo"],
-    ["Athanor", "Athanor"],
-    ["Tatara", "Tatara"],
-    ["Metenox Moon Drill", "Metenox Moon Drill"],
-    ["Customs Office", "Customs Office"],
-    ["IHub", "IHub"],
-    ["TCU", "TCU"],
-    ["POS", "POS"]
-  ];
-  const TIMER_KIND_OPTIONS = [
-    ["", "—"],
-    ["Атака", "Атака"],
-    ["Оборона", "Оборона"]
-  ];
-  const STRUCTURE_RESULT_OPTIONS = [
-    ["", "—"],
-    ["Защищена", "Защищена"],
-    ["Уничтожена", "Уничтожена"]
-  ];
-  const DEFAULT_REPAIR_DURATION_MS = 15 * 60 * 1000;
-  const POST_TIMER_STATES = new Map([
-    ["Customs Office", { durationMs: 2 * 60 * 60 * 1000, label: "Ремонт", className: "is-repair" }],
-    ["Metenox Moon Drill", { durationMs: 30 * 60 * 1000, label: "Ожидание итога", className: "is-pending-result" }],
-    ["IHub", { durationMs: 30 * 60 * 1000, label: "Идёт событие", className: "is-pending-result" }],
-    ["TCU", { durationMs: 30 * 60 * 1000, label: "Идёт событие", className: "is-pending-result" }],
-    ["POS", { durationMs: 30 * 60 * 1000, label: "Ожидание итога", className: "is-pending-result" }]
-  ]);
-
-  const hasSupabaseConfig = Boolean(
-    CONFIG.supabaseUrl &&
-    CONFIG.supabaseKey &&
-    !String(CONFIG.supabaseUrl).includes("YOUR-PROJECT") &&
-    !String(CONFIG.supabaseKey).includes("YOUR-SUPABASE") &&
-    window.supabase
-  );
-
-  const db = hasSupabaseConfig
-    ? window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey)
-    : null;
+  const hasSupabaseConfig = isSupabaseConfigured(CONFIG);
+  const db = getTimerboardApi(CONFIG);
 
   let timers = [];
   let lastRenderedSignature = "";
@@ -118,6 +93,8 @@
   init();
 
   function init() {
+    populateSelect(els.defaultObjectName, STRUCTURE_TYPE_OPTIONS);
+    populateSelect(els.defaultTimerKind, TIMER_KIND_OPTIONS);
     if (!hasSupabaseConfig) {
       els.configWarning.hidden = false;
     }
@@ -205,6 +182,16 @@
     window.setInterval(loadTimers, POLL_MS);
   }
 
+  function populateSelect(select, options) {
+    select.textContent = "";
+    for (const [value, label] of options) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+  }
+
   function toggleAdminView() {
     if (adminViewEnabled) {
       applyAdminView(false);
@@ -247,10 +234,7 @@
     els.confirmAdminAccessBtn.disabled = true;
     if (showError) setAdminAccessStatus("Проверяю ключ...", false);
     try {
-      const { error } = await db.rpc("list_fleets_admin", {
-        p_board_id: BOARD_ID,
-        p_admin_key: adminKey
-      });
+      const { error } = await db.listFleetsAdmin(BOARD_ID, adminKey);
       if (error) throw error;
       adminKeyValidated = true;
       return true;
@@ -336,10 +320,7 @@
           return;
         }
 
-        const { data, error } = await db.rpc("get_timers", {
-          p_board_id: BOARD_ID,
-          p_view_key: requestedKey
-        });
+        const { data, error } = await db.getTimers(BOARD_ID, requestedKey);
 
         if (!isCurrentTimerLoad(requestGeneration, requestedKey)) return;
         if (error) throw error;
@@ -435,11 +416,7 @@
 
     els.saveViewKeyBtn.disabled = true;
     try {
-      const { error } = await db.rpc("set_timerboard_view_key", {
-        p_board_id: BOARD_ID,
-        p_admin_key: adminKey,
-        p_view_key: newViewKey
-      });
+      const { error } = await db.setViewKey(BOARD_ID, adminKey, newViewKey);
       if (error) throw error;
 
       els.newViewKey.value = "";
@@ -515,11 +492,7 @@
           end_at: timer.end_at,
           note: normalizeStructureResult(timer.note)
         }));
-        const { data, error } = await db.rpc("add_timers", {
-          p_board_id: BOARD_ID,
-          p_admin_key: adminKey,
-          p_timers: payload
-        });
+        const { data, error } = await db.addTimers(BOARD_ID, adminKey, payload);
         if (error) throw error;
         if (Array.isArray(data)) addedCount = data.length;
         else if (Number.isFinite(Number(data))) addedCount = Number(data);
@@ -564,11 +537,7 @@
           setStatus("Для удаления нужен админ-ключ.", true);
           return;
         }
-        const { error } = await db.rpc("delete_timer", {
-          p_board_id: BOARD_ID,
-          p_admin_key: adminKey,
-          p_id: id
-        });
+        const { error } = await db.deleteTimer(BOARD_ID, adminKey, id);
         if (error) throw error;
       } else {
         const local = readLocalTimers().filter((t) => t.id !== id);
@@ -602,10 +571,7 @@
           setStatus("Для очистки истории нужен админ-ключ.", true);
           return;
         }
-        const { data, error } = await db.rpc("clear_timer_history", {
-          p_board_id: BOARD_ID,
-          p_admin_key: adminKey
-        });
+        const { data, error } = await db.clearTimerHistory(BOARD_ID, adminKey);
         if (error) throw error;
         const rpcCount = Number(data);
         if (Number.isFinite(rpcCount)) deletedCount = rpcCount;
@@ -646,27 +612,8 @@
     }
   }
 
-  function parseInput(input) {
-    const blocks = splitTimerBlocks(input);
-    return blocks.map(parseTimerBlock);
-  }
-
   function parseInputWithDefaults(input) {
-    return parseInput(input).map(applyTimerDefaults);
-  }
-
-  function applyTimerDefaults(timer) {
-    const defaults = getTimerDefaults();
-    return {
-      ...timer,
-      title: defaults.title || cleanText(timer.title),
-      system: defaults.system || cleanText(timer.system),
-      object_name: defaults.object_name || normalizeStructureType(timer.object_name),
-      structure: defaults.structure || cleanText(timer.structure),
-      owner: defaults.owner || cleanText(timer.owner),
-      distance: defaults.distance || normalizeTimerKind(timer.distance),
-      mode: defaults.mode || cleanText(timer.mode)
-    };
+    return parseTimerInput(input, getTimerDefaults());
   }
 
   function getTimerDefaults() {
@@ -695,122 +642,6 @@
     setStatus("Параметры по умолчанию очищены.", false);
   }
 
-  function splitTimerBlocks(input) {
-    const normalized = normalizeBreaks(input);
-    const lines = normalized.split("\n").map((line) => line.trim()).filter(Boolean);
-    const blocks = [];
-    let current = [];
-
-    for (const line of lines) {
-      current.push(line);
-      if (hasTimerDate(line)) {
-        blocks.push(current.join("\n"));
-        current = [];
-      }
-    }
-
-    if (current.length && hasTimerDate(current.join("\n"))) {
-      blocks.push(current.join("\n"));
-    }
-
-    return blocks.filter(hasTimerDate);
-  }
-
-  function parseTimerBlock(block) {
-    const lines = normalizeBreaks(block).split("\n").map((line) => line.trim()).filter(Boolean);
-    const firstLine = lines.find((line) => !hasTimerDate(line) && !isDistanceLine(line));
-    if (!firstLine) throw new Error("Не нашёл строку с названием таймера.");
-
-    const arrow = firstLine.match(/^(.*?)\s*>\s*(.*)$/);
-    const title = arrow && !hasChatTimestamp(arrow[1]) ? cleanText(arrow[1]) : "";
-    let right = cleanText(arrow ? arrow[2] : firstLine);
-
-    const ownerMatch = right.match(/\[([^\]]+)\]\s*$/);
-    const owner = ownerMatch ? cleanText(ownerMatch[1]) : "";
-    if (ownerMatch) right = cleanText(right.replace(/\[([^\]]+)\]\s*$/, ""));
-
-    let system = "";
-    let object_name = "";
-    let structure = "";
-
-    const withObject = right.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
-    if (withObject) {
-      const typeGuess = cleanText(withObject[1]);
-      const location = cleanText(withObject[2]);
-      object_name = normalizeStructureType(typeGuess);
-      structure = object_name ? location : typeGuess;
-      system = cleanText(location.replace(/\s+[IVXLCDM]+$/i, ""));
-    } else {
-      const withDash = right.match(/^(.+?)\s+-\s+(.+)$/);
-      if (withDash) {
-        system = cleanText(withDash[1]);
-        structure = cleanText(withDash[2]);
-      } else {
-        structure = cleanText(right);
-      }
-    }
-
-    const dateMatch = getTimerDateMatch(block);
-    if (!dateMatch) throw new Error(`Не нашёл дату в формате 2026.05.25 14:42:47: ${firstLine}`);
-
-    const [, year, month, day, hour, minute, second = "0"] = dateMatch;
-    const endDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
-    if (Number.isNaN(endDate.getTime())) throw new Error(`Некорректная дата: ${dateMatch[0]}`);
-
-    const modeLine = lines.find(hasTimerDate) || "";
-    const mode = cleanText(modeLine.replace(/\s+(?:до|until)\s+\d{4}[.-]\d{1,2}[.-]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?.*$/i, ""));
-
-    const distance = "";
-
-    return {
-      raw_text: block,
-      title,
-      system,
-      object_name,
-      structure,
-      owner,
-      distance,
-      mode,
-      end_at: endDate.toISOString(),
-      note: ""
-    };
-  }
-
-  function hasTimerDate(value) {
-    return Boolean(getTimerDateMatch(value));
-  }
-
-  function getTimerDateMatch(value) {
-    return String(value || "").match(/(?:до|until)\s+(\d{4})[.-](\d{1,2})[.-](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/i);
-  }
-
-  function isDistanceLine(value) {
-    return /^(\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.)|\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:км|km|м|m))$/i.test(value);
-  }
-
-  function hasChatTimestamp(value) {
-    return /^\s*\[\d{2}:\d{2}:\d{2}\]/.test(String(value || ""));
-  }
-
-  function normalizeBreaks(value) {
-    return String(value || "")
-      .replace(/&lt;br\s*\/?&gt;/gi, "\n")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/\\n/g, "\n")
-      .replace(/\r/g, "\n")
-      .replace(/(\])\s*(?=\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:км|km|м|m|а\.?[ \t]*е\.?|au|a\.u\.))/gi, "$1\n")
-      .replace(/(\d[\d \t]*(?:[,.]\d+)?[ \t]*(?:км|km|м|m)|\d+(?:[,.]\d+)?[ \t]*(?:а\.?[ \t]*е\.?|au|a\.u\.))\s*(?=(?:Укреп|В оборонном|Reinforced))/gi, "$1\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  }
-
-  function cleanText(value) {
-    return String(value || "")
-      .replace(/\s+/g, " ")
-      .replace(/\*+$/g, "")
-      .trim();
-  }
-
   function renderTimers() {
     if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("table-control")) return;
 
@@ -830,7 +661,7 @@
     els.statEnded.textContent = String(endedCount);
 
     const visible = enriched
-      .filter((timer) => !timer.isCompleted || showEnded && isWithinEndedWindow(timer.completedAgeMs, endedWindowMs))
+      .filter((timer) => !timer.isCompleted || showEnded && isWithinCompletedWindow(timer.completedAgeMs, endedWindowMs))
       .filter((timer) => !search || searchableText(timer).includes(search))
       .sort((a, b) => compareTimers(a, b, boardSort));
 
@@ -965,14 +796,14 @@
   async function saveFleetBoardResult(timer, value) {
     if (!db || !canFleetEditResult(timer.id)) return;
     try {
-      const { error } = await db.rpc("set_fleet_timer_result", {
-        p_board_id: BOARD_ID,
-        p_view_key: getReadKey(),
-        p_access_key: fleetBoardAccess.fleetKey,
-        p_fleet_id: fleetBoardAccess.fleetId,
-        p_timer_id: timer.id,
-        p_result: normalizeStructureResult(value)
-      });
+      const { error } = await db.setFleetTimerResult(
+        BOARD_ID,
+        getReadKey(),
+        fleetBoardAccess.fleetKey,
+        fleetBoardAccess.fleetId,
+        timer.id,
+        normalizeStructureResult(value)
+      );
       if (error) throw error;
       timers = timers.map((item) => item.id === timer.id ? {
         ...item,
@@ -1214,13 +1045,13 @@
           return;
         }
 
-        const { data, error } = await db.rpc("patch_timer_admin_fields", {
-          p_board_id: BOARD_ID,
-          p_admin_key: adminKey,
-          p_id: timer.id,
-          p_changes: patch,
-          p_expected_updated_at: timer.updated_at
-        });
+        const { data, error } = await db.patchTimer(
+          BOARD_ID,
+          adminKey,
+          timer.id,
+          patch,
+          timer.updated_at
+        );
         if (error) throw error;
         if (!data) throw new Error("patch_timer_admin_fields returned no timer");
         const serverTimer = normalizeTimer(data);
@@ -1255,20 +1086,6 @@
     return err?.code === "40001" || /timer update conflict/i.test(message);
   }
 
-  function normalizeTimerKind(value) {
-    const text = cleanText(value);
-    if (/^атака$/i.test(text)) return "Атака";
-    if (/^оборона$/i.test(text)) return "Оборона";
-    return "";
-  }
-
-  function normalizeStructureResult(value) {
-    const text = cleanText(value);
-    if (/^защищена$/i.test(text)) return "Защищена";
-    if (/^уничтожена$/i.test(text)) return "Уничтожена";
-    return "";
-  }
-
   function timerKindClass(value) {
     const kind = normalizeTimerKind(value);
     if (kind === "Атака") return "is-attack-kind";
@@ -1287,10 +1104,6 @@
     if (!els.endedWindow || els.endedWindow.value === "all") return Infinity;
     const hours = Number(els.endedWindow.value || 24);
     return Number.isFinite(hours) && hours > 0 ? hours * 3600 * 1000 : 24 * 3600 * 1000;
-  }
-
-  function isWithinEndedWindow(completedAgeMs, endedWindowMs) {
-    return completedAgeMs <= endedWindowMs;
   }
 
   function handleSortSelectChange() {
@@ -1346,16 +1159,6 @@
     return new Date(a.end_at).getTime() - new Date(b.end_at).getTime();
   }
 
-  function compareText(a, b) {
-    return String(a || "").localeCompare(String(b || ""), "ru", { numeric: true, sensitivity: "base" });
-  }
-
-  function normalizeStructureType(value) {
-    const text = cleanText(value);
-    const option = STRUCTURE_TYPE_OPTIONS.find(([optionValue]) => optionValue && optionValue.toLowerCase() === text.toLowerCase());
-    return option ? option[0] : "";
-  }
-
   function tick() {
     updateLiveTimerCells();
     renderTimers();
@@ -1374,104 +1177,6 @@
       setCell(row, "remaining", state.remainingText);
       setCell(row, "status", state.status.label);
     });
-  }
-
-  function getTimerState(timer, now = Date.now()) {
-    const endAtMs = new Date(timer.end_at).getTime();
-    const mainRemainingMs = endAtMs - now;
-    const result = normalizeStructureResult(timer.note);
-
-    if (result) {
-      const updatedAtMs = new Date(timer.updated_at).getTime();
-      const completedAtMs = Number.isFinite(updatedAtMs) ? Math.max(endAtMs, updatedAtMs) : endAtMs;
-      return completedTimerState(now, completedAtMs);
-    }
-
-    if (mainRemainingMs > 0) {
-      const isSoon = mainRemainingMs <= 4 * 3600 * 1000;
-      return {
-        phase: "active",
-        isCompleted: false,
-        isSoon,
-        completedAgeMs: 0,
-        remainingText: formatRemaining(mainRemainingMs),
-        status: isSoon
-          ? { label: "Скоро", className: "is-soon" }
-          : { label: "Активен", className: "is-active" }
-      };
-    }
-
-    const structureType = normalizeStructureType(timer.object_name);
-    const postTimerState = POST_TIMER_STATES.get(structureType) || {
-      durationMs: DEFAULT_REPAIR_DURATION_MS,
-      label: "Ремонт",
-      className: "is-repair"
-    };
-    const repairEndAtMs = endAtMs + postTimerState.durationMs;
-    const repairRemainingMs = repairEndAtMs - now;
-    if (repairRemainingMs > 0) {
-      return {
-        phase: postTimerState.className === "is-repair" ? "repair" : "pending-result",
-        isCompleted: false,
-        isSoon: true,
-        completedAgeMs: 0,
-        remainingText: formatRemaining(repairRemainingMs),
-        status: { label: postTimerState.label, className: postTimerState.className }
-      };
-    }
-
-    return completedTimerState(now, repairEndAtMs);
-  }
-
-  function completedTimerState(now, completedAtMs) {
-    return {
-      phase: "completed",
-      isCompleted: true,
-      isSoon: false,
-      completedAgeMs: Math.max(0, now - completedAtMs),
-      remainingText: "00:00:00",
-      status: { label: "Завершён", className: "is-ended" }
-    };
-  }
-
-  function formatRemaining(ms) {
-    if (ms <= 0) return "00:00:00";
-    const total = Math.floor(ms / 1000);
-    const days = Math.floor(total / 86400);
-    const hours = Math.floor((total % 86400) / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    const seconds = total % 60;
-    const clock = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-    return days > 0 ? `${days} д ${clock}` : clock;
-  }
-
-  function formatUtc(iso) {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    return [
-      d.getUTCFullYear(),
-      pad(d.getUTCMonth() + 1),
-      pad(d.getUTCDate())
-    ].join(".") + " " + [
-      pad(d.getUTCHours()),
-      pad(d.getUTCMinutes()),
-      pad(d.getUTCSeconds())
-    ].join(":");
-  }
-
-  function parseUtcInput(value) {
-    const match = String(value || "").trim().match(/^(\d{4})[.-](\d{1,2})[.-](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (!match) return "";
-
-    const [, year, month, day, hour, minute, second = "0"] = match;
-    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
-    if (Number.isNaN(date.getTime())) return "";
-
-    return date.toISOString();
-  }
-
-  function pad(value) {
-    return String(value).padStart(2, "0");
   }
 
   function searchableText(timer) {
@@ -1552,12 +1257,4 @@
     return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function escapeHtml(value) {
-    return String(value || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
 })();

@@ -1,11 +1,15 @@
+import { STRUCTURE_TYPES, TIMER_KINDS } from "./core/constants.js";
+import { planFleetAssignments, planSequentialRoute } from "./core/route-planner.js";
+import { getTimerboardApi, hasSupabaseConfig as isSupabaseConfigured } from "./services/supabase-api.js";
+import { createSystemCatalogService } from "./services/system-catalog.js";
+import { escapeHtml, formatUtc } from "./shared/format.js";
+
 (function () {
   "use strict";
 
   const CONFIG = window.EVE_TIMERBOARD_CONFIG || {};
   const BOARD_ID = CONFIG.boardId || "main";
   let adminViewEnabled = document.body.classList.contains("is-admin-view");
-  const ESI_BASE = "https://esi.evetech.net";
-  const ESI_COMPATIBILITY_DATE = "2025-09-30";
   const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
   const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
   const GENERAL_SERVICE_KEY = `eve_timerboard_route_service_${BOARD_ID}`;
@@ -17,17 +21,12 @@
   const MAP_REGION_SYSTEM_LIMIT = 900;
   let viewAccessGranted = document.body.classList.contains("has-view-access");
 
-  const hasSupabaseConfig = Boolean(
-    CONFIG.supabaseUrl &&
-    CONFIG.supabaseKey &&
-    !String(CONFIG.supabaseUrl).includes("YOUR-PROJECT") &&
-    !String(CONFIG.supabaseKey).includes("YOUR-SUPABASE") &&
-    window.supabase
-  );
-
-  const db = hasSupabaseConfig
-    ? window.supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseKey)
-    : null;
+  const hasSupabaseConfig = isSupabaseConfigured(CONFIG);
+  const db = getTimerboardApi(CONFIG);
+  const systemCatalog = createSystemCatalogService({
+    systemCatalogUrl: SYSTEM_CATALOG_URL,
+    regionCatalogUrl: REGION_CATALOG_URL
+  });
 
   const state = {
     mapMode: "general",
@@ -43,15 +42,6 @@
     selectedFleetKey: "",
     boardAccessFleetId: "",
     generalPlan: null,
-    routeCache: new Map(),
-    nameCache: new Map(),
-    idNameCache: new Map(),
-    systemCatalog: [],
-    systemById: new Map(),
-    systemByName: new Map(),
-    systemsByRegion: new Map(),
-    regionById: new Map(),
-    systemCatalogPromise: null,
     autocompleteInput: null,
     autocompleteItems: [],
     autocompleteIndex: -1,
@@ -124,6 +114,10 @@
   init();
 
   function init() {
+    populateMultiFilter(els.generalTimerKindFilter, TIMER_KINDS);
+    populateMultiFilter(els.generalObjectFilter, STRUCTURE_TYPES);
+    populateMultiFilter(els.fleetTimerKindFilter, TIMER_KINDS);
+    populateMultiFilter(els.fleetObjectFilter, STRUCTURE_TYPES);
     els.generalOriginSystem.value = localStorage.getItem(GENERAL_ORIGIN_KEY) || "";
     els.generalServiceMinutes.value = localStorage.getItem(GENERAL_SERVICE_KEY) || "10";
     restoreRouteMapHeight();
@@ -200,6 +194,26 @@
     setMapMode("general");
     updateRoutesAccess();
     applyHashView();
+  }
+
+  function populateMultiFilter(filter, values) {
+    const container = filter.querySelector(".multi-filter-options");
+    container.textContent = "";
+    for (const value of values) {
+      const label = document.createElement("label");
+      label.className = "checkline multi-filter-option";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = value;
+      input.checked = true;
+      const box = document.createElement("span");
+      box.className = "checkbox-box";
+      box.setAttribute("aria-hidden", "true");
+      const text = document.createElement("span");
+      text.textContent = value;
+      label.append(input, box, text);
+      container.appendChild(label);
+    }
   }
 
   function applyHashView() {
@@ -314,10 +328,7 @@
   }
 
   async function loadPublicFleets() {
-    const { data, error } = await db.rpc("list_fleets", {
-      p_board_id: BOARD_ID,
-      p_view_key: getReadKey()
-    });
+    const { data, error } = await db.listFleets(BOARD_ID, getReadKey());
     if (error) throw error;
     state.fleets = data || [];
     renderFleetSelect();
@@ -325,10 +336,7 @@
   }
 
   async function loadAdminFleets() {
-    const { data, error } = await db.rpc("list_fleets_admin", {
-      p_board_id: BOARD_ID,
-      p_admin_key: getAdminKey()
-    });
+    const { data, error } = await db.listFleetsAdmin(BOARD_ID, getAdminKey());
     if (error) throw error;
     state.adminFleets = data || [];
     state.fleets = state.adminFleets
@@ -419,14 +427,12 @@
     try {
       const system = await requireSystemName(enteredSystem, els.newFleetSystem);
       els.newFleetSystem.value = system;
-      const { data, error } = await db.rpc("create_fleet", {
-        p_board_id: BOARD_ID,
-        p_admin_key: adminKey,
-        p_name: name,
-        p_color: els.newFleetColor.value,
-        p_current_system: system,
-        p_seconds_per_jump: boundedNumber(els.newFleetSecondsPerJump.value, 5, 3600, 60),
-        p_service_minutes: boundedNumber(els.newFleetServiceMinutes.value, 0, 240, 10)
+      const { data, error } = await db.createFleet(BOARD_ID, adminKey, {
+        name,
+        color: els.newFleetColor.value,
+        currentSystem: system,
+        secondsPerJump: boundedNumber(els.newFleetSecondsPerJump.value, 5, 3600, 60),
+        serviceMinutes: boundedNumber(els.newFleetServiceMinutes.value, 0, 240, 10)
       });
       if (error) throw error;
       const created = data && data[0];
@@ -459,16 +465,13 @@
     button.disabled = true;
     try {
       const draft = await readFleetDraft(row, fleetId);
-      const { error } = await db.rpc("update_fleet", {
-        p_board_id: BOARD_ID,
-        p_admin_key: getAdminKey(),
-        p_fleet_id: fleetId,
-        p_name: draft.name,
-        p_color: draft.color,
-        p_current_system: draft.current_system,
-        p_seconds_per_jump: draft.seconds_per_jump,
-        p_service_minutes: draft.service_minutes,
-        p_active: draft.active
+      const { error } = await db.updateFleet(BOARD_ID, getAdminKey(), fleetId, {
+        name: draft.name,
+        color: draft.color,
+        currentSystem: draft.current_system,
+        secondsPerJump: draft.seconds_per_jump,
+        serviceMinutes: draft.service_minutes,
+        active: draft.active
       });
       if (error) throw error;
       await loadAdminFleets();
@@ -515,16 +518,13 @@
       if (!saved) continue;
       const draft = await readFleetDraft(row, fleetId);
       if (!fleetDraftChanged(draft, saved)) continue;
-      const { error } = await db.rpc("update_fleet", {
-        p_board_id: BOARD_ID,
-        p_admin_key: getAdminKey(),
-        p_fleet_id: fleetId,
-        p_name: draft.name,
-        p_color: draft.color,
-        p_current_system: draft.current_system,
-        p_seconds_per_jump: draft.seconds_per_jump,
-        p_service_minutes: draft.service_minutes,
-        p_active: draft.active
+      const { error } = await db.updateFleet(BOARD_ID, getAdminKey(), fleetId, {
+        name: draft.name,
+        color: draft.color,
+        currentSystem: draft.current_system,
+        secondsPerJump: draft.seconds_per_jump,
+        serviceMinutes: draft.service_minutes,
+        active: draft.active
       });
       if (error) throw error;
       changed += 1;
@@ -537,11 +537,7 @@
     if (!window.confirm("Выпустить новый ключ? Старый ключ сразу перестанет работать.")) return;
     button.disabled = true;
     try {
-      const { data, error } = await db.rpc("rotate_fleet_key", {
-        p_board_id: BOARD_ID,
-        p_admin_key: getAdminKey(),
-        p_fleet_id: fleetId
-      });
+      const { data, error } = await db.rotateFleetKey(BOARD_ID, getAdminKey(), fleetId);
       if (error) throw error;
       const rotated = data && data[0];
       const fleet = state.adminFleets.find((item) => item.fleet_id === fleetId);
@@ -560,11 +556,7 @@
     if (!window.confirm(`Удалить профиль «${fleet ? fleet.fleet_name : "флот"}» и его назначения?`)) return;
     button.disabled = true;
     try {
-      const { error } = await db.rpc("delete_fleet", {
-        p_board_id: BOARD_ID,
-        p_admin_key: getAdminKey(),
-        p_fleet_id: fleetId
-      });
+      const { error } = await db.deleteFleet(BOARD_ID, getAdminKey(), fleetId);
       if (error) throw error;
       await loadAdminFleets();
       await loadAllFleetRoutes();
@@ -628,53 +620,18 @@
         ...targets.map((timer) => timer.system)
       ]);
 
-      const fleetStates = fleets.map((fleet) => {
-        const system = resolved.get(normalizeName(fleet.current_system));
-        if (!system) throw new Error(`Система флота не найдена в каталоге EVE: ${fleet.current_system}`);
-        return {
-          fleet,
-          currentId: system.id,
-          availableAt: Date.now(),
-          order: 0
-        };
-      });
-
-      const assignments = [];
-      const sortedTargets = targets.slice().sort((a, b) => new Date(a.end_at) - new Date(b.end_at));
-      for (let index = 0; index < sortedTargets.length; index += 1) {
-        const timer = sortedTargets[index];
-        setLine(
+      const assignments = await planFleetAssignments({
+        fleets,
+        targets,
+        resolveSystem: (name) => resolved.get(normalizeName(name)),
+        getRoute,
+        now: Date.now(),
+        onProgress: ({ index, total, timer }) => setLine(
           els.fleetAdminStatus,
-          `Расчёт цели ${index + 1} из ${sortedTargets.length}: ${timer.system}…`,
+          `Расчёт цели ${index + 1} из ${total}: ${timer.system}…`,
           false
-        );
-        const targetSystem = resolved.get(normalizeName(timer.system));
-        if (!targetSystem) throw new Error(`Система таймера не найдена в каталоге EVE: ${timer.system}`);
-
-        const options = await Promise.all(fleetStates.map((fleetState) =>
-          calculateFleetTargetOption(fleetState, targetSystem, timer)
-        ));
-
-        options.sort((a, b) => {
-          if (Boolean(a.lateness) !== Boolean(b.lateness)) return a.lateness ? 1 : -1;
-          if (a.lateness !== b.lateness) return a.lateness - b.lateness;
-          if (a.arrivalAt !== b.arrivalAt) return a.arrivalAt - b.arrivalAt;
-          return a.jumps - b.jumps;
-        });
-
-        const best = options[0];
-        best.fleetState.order += 1;
-        assignments.push({
-          fleet_id: best.fleetState.fleet.fleet_id,
-          timer_id: timer.id,
-          route_order: best.fleetState.order,
-          jump_count: best.jumps,
-          eta_at: new Date(best.arrivalAt).toISOString(),
-          route_ids: best.routeIds
-        });
-
-        advanceFleetState(best, targetSystem, timer);
-      }
+        )
+      });
 
       const routeIds = [...new Set(assignments.flatMap((item) => item.route_ids))];
       const routeNames = await resolveIdsToNames(routeIds);
@@ -687,11 +644,7 @@
         route_nodes: item.route_ids.map((id) => ({ id, name: routeNames.get(Number(id)) || String(id) }))
       }));
 
-      const { data, error } = await db.rpc("replace_fleet_assignments", {
-        p_board_id: BOARD_ID,
-        p_admin_key: getAdminKey(),
-        p_assignments: payload
-      });
+      const { data, error } = await db.replaceFleetAssignments(BOARD_ID, getAdminKey(), payload);
       if (error) throw error;
       setLine(
         els.fleetAdminStatus,
@@ -704,27 +657,6 @@
     } finally {
       els.calculateFleetRoutesBtn.disabled = false;
     }
-  }
-
-  async function calculateFleetTargetOption(fleetState, targetSystem, timer) {
-    const routeIds = await getRoute(fleetState.currentId, targetSystem.id);
-    const jumps = Math.max(0, routeIds.length - 1);
-    const arrivalAt = fleetState.availableAt + jumps * Number(fleetState.fleet.seconds_per_jump) * 1000;
-    const deadline = new Date(timer.end_at).getTime();
-    return {
-      fleetState,
-      routeIds,
-      jumps,
-      arrivalAt,
-      lateness: Math.max(0, arrivalAt - deadline)
-    };
-  }
-
-  function advanceFleetState(option, targetSystem, timer) {
-    const deadline = new Date(timer.end_at).getTime();
-    option.fleetState.availableAt = Math.max(option.arrivalAt, deadline) +
-      Number(option.fleetState.fleet.service_minutes) * 60 * 1000;
-    option.fleetState.currentId = targetSystem.id;
   }
 
   async function buildGeneralRoute() {
@@ -757,38 +689,22 @@
       const originSystem = resolved.get(normalizeName(origin));
       if (!originSystem) throw new Error(`Система не найдена в каталоге EVE: ${origin}`);
 
-      const fleetState = {
+      const candidates = await planSequentialRoute({
+        originSystem,
         fleet: {
           seconds_per_jump: secondsPerJump,
           service_minutes: serviceMinutes
         },
-        currentId: originSystem.id,
-        availableAt: Date.now(),
-        order: 0
-      };
-      const candidates = [];
-      const sortedTargets = targets.slice().sort((a, b) => new Date(a.end_at) - new Date(b.end_at));
-      for (let index = 0; index < sortedTargets.length; index += 1) {
-        const timer = sortedTargets[index];
-        setLine(
+        targets,
+        resolveSystem: (name) => resolved.get(normalizeName(name)),
+        getRoute,
+        now: Date.now(),
+        onProgress: ({ index, total, timer }) => setLine(
           els.generalRouteStatus,
-          `Расчёт цели ${index + 1} из ${sortedTargets.length}: ${timer.system}…`,
+          `Расчёт цели ${index + 1} из ${total}: ${timer.system}…`,
           false
-        );
-        const targetSystem = resolved.get(normalizeName(timer.system));
-        if (!targetSystem) throw new Error(`Система таймера не найдена в каталоге EVE: ${timer.system}`);
-        const option = await calculateFleetTargetOption(fleetState, targetSystem, timer);
-        fleetState.order += 1;
-        candidates.push({
-          timer,
-          targetSystem,
-          routeIds: option.routeIds,
-          jumps: option.jumps,
-          eta: option.arrivalAt,
-          marginMs: new Date(timer.end_at).getTime() - option.arrivalAt
-        });
-        advanceFleetState(option, targetSystem, timer);
-      }
+        )
+      });
 
       if (!candidates.length) throw new Error("Не удалось построить путь ни к одной цели.");
       const recommended = candidates[0];
@@ -934,12 +850,7 @@
 
     els.openFleetRouteBtn.disabled = true;
     try {
-      const { data, error } = await db.rpc("get_fleet_route", {
-        p_board_id: BOARD_ID,
-        p_view_key: getReadKey(),
-        p_fleet_id: fleetId,
-        p_fleet_key: fleetKey
-      });
+      const { data, error } = await db.getFleetRoute(BOARD_ID, getReadKey(), fleetId, fleetKey);
       if (error) throw error;
       state.selectedFleetId = fleetId;
       state.selectedFleetKey = fleetKey;
@@ -960,10 +871,7 @@
 
   async function loadAllFleetRoutes() {
     if (!getAdminKey()) return;
-    const { data, error } = await db.rpc("get_all_fleet_routes", {
-      p_board_id: BOARD_ID,
-      p_admin_key: getAdminKey()
-    });
+    const { data, error } = await db.getAllFleetRoutes(BOARD_ID, getAdminKey());
     if (error) throw error;
     state.routeRows = data || [];
     renderFleetRoutes(state.routeRows, "Все флоты");
@@ -1358,14 +1266,14 @@
     if (group) group.querySelectorAll("button").forEach((item) => { item.disabled = true; });
 
     try {
-      const { error } = await db.rpc("set_fleet_timer_result", {
-        p_board_id: BOARD_ID,
-        p_view_key: getReadKey(),
-        p_access_key: state.selectedFleetKey,
-        p_fleet_id: state.selectedFleetId,
-        p_timer_id: row.timer_id,
-        p_result: nextResult
-      });
+      const { error } = await db.setFleetTimerResult(
+        BOARD_ID,
+        getReadKey(),
+        state.selectedFleetKey,
+        state.selectedFleetId,
+        row.timer_id,
+        nextResult
+      );
       if (error) throw error;
       state.routeRows = state.routeRows.map((item) =>
         String(item.timer_id) === String(row.timer_id) && String(item.fleet_id) === String(row.fleet_id)
@@ -1419,10 +1327,7 @@
   }
 
   async function loadTimersForRoutes(accessKey) {
-    const { data, error } = await db.rpc("get_timers", {
-      p_board_id: BOARD_ID,
-      p_view_key: accessKey
-    });
+    const { data, error } = await db.getTimers(BOARD_ID, accessKey);
     if (error) throw error;
     return data || [];
   }
@@ -1551,55 +1456,14 @@
   }
 
   async function loadSystemCatalog() {
-    if (state.systemCatalog.length) return state.systemCatalog;
-    if (state.systemCatalogPromise) return state.systemCatalogPromise;
-    state.systemCatalogPromise = Promise.all([
-      fetch(SYSTEM_CATALOG_URL).then((response) => {
-        if (!response.ok) throw new Error(`Каталог систем не загрузился: HTTP ${response.status}`);
-        return response.json();
-      }),
-      fetch(REGION_CATALOG_URL)
-        .then((response) => response.ok ? response.json() : { regions: [] })
-        .catch(() => ({ regions: [] }))
-    ])
-      .then(([payload, regionPayload]) => {
-        const systems = Array.isArray(payload.systems) ? payload.systems : [];
-        if (!systems.length) throw new Error("Каталог систем пуст.");
-        const regions = Array.isArray(regionPayload.regions) ? regionPayload.regions : [];
-        regions.forEach((region) => {
-          const id = Number(region.id);
-          if (id && region.name) state.regionById.set(id, String(region.name));
-        });
-        state.systemCatalog = systems;
-        for (const system of systems) {
-          const normalized = {
-            ...system,
-            id: Number(system.id),
-            x: Number(system.x),
-            y: Number(system.y),
-            security: Number(system.security || 0),
-            regionId: Number(system.regionId || 0),
-            neighbors: Array.isArray(system.neighbors) ? system.neighbors.map(Number) : []
-          };
-          state.systemById.set(normalized.id, normalized);
-          state.systemByName.set(normalizeName(normalized.name), normalized);
-          if (!state.systemsByRegion.has(normalized.regionId)) {
-            state.systemsByRegion.set(normalized.regionId, []);
-          }
-          state.systemsByRegion.get(normalized.regionId).push(normalized);
-          state.nameCache.set(normalizeName(normalized.name), { id: normalized.id, name: normalized.name });
-          state.idNameCache.set(normalized.id, normalized.name);
-        }
-        return state.systemCatalog;
-      });
-    return state.systemCatalogPromise;
+    return systemCatalog.load();
   }
 
   async function requireSystemName(value, input) {
     const entered = String(value || "").trim();
     if (!entered) throw new Error("Укажите систему.");
     await loadSystemCatalog();
-    const system = state.systemByName.get(normalizeName(entered));
+    const system = systemCatalog.findByName(entered);
     if (!system) {
       if (input) input.classList.add("is-invalid");
       throw new Error(`Система «${entered}» не найдена. Выберите существующую систему из подсказок.`);
@@ -1659,15 +1523,7 @@
       return;
     }
     if (state.autocompleteInput !== input) return;
-    const prefix = [];
-    const contains = [];
-    for (const system of state.systemCatalog) {
-      const name = normalizeName(system.name);
-      if (name.startsWith(term)) prefix.push(system);
-      else if (name.includes(term)) contains.push(system);
-      if (prefix.length >= 10) break;
-    }
-    state.autocompleteItems = prefix.concat(contains).slice(0, 10);
+    state.autocompleteItems = systemCatalog.suggestions(term, 10);
     state.autocompleteIndex = -1;
     const list = getSystemSuggestionList();
     if (!state.autocompleteItems.length) {
@@ -1740,127 +1596,15 @@
   }
 
   async function resolveSystemNames(names) {
-    await loadSystemCatalog().catch(() => {});
-    const uniqueNames = [...new Set(names.map((name) => String(name || "").trim()).filter(Boolean))];
-    const missing = uniqueNames.filter((name) => !state.nameCache.has(normalizeName(name)));
-    if (missing.length) {
-      const data = await fetchJson(`${ESI_BASE}/latest/universe/ids/?datasource=tranquility&language=en`, {
-        method: "POST",
-        body: JSON.stringify(missing)
-      });
-      for (const system of data.systems || []) {
-        const normalized = { id: Number(system.id), name: system.name };
-        state.nameCache.set(normalizeName(system.name), normalized);
-        state.idNameCache.set(normalized.id, normalized.name);
-      }
-    }
-    return state.nameCache;
+    return systemCatalog.resolveSystemNames(names);
   }
 
   async function resolveIdsToNames(ids) {
-    const uniqueIds = [...new Set(ids.map(Number).filter(Number.isFinite))];
-    const missing = uniqueIds.filter((id) => !state.idNameCache.has(id));
-    for (let index = 0; index < missing.length; index += 1000) {
-      const chunk = missing.slice(index, index + 1000);
-      const data = await fetchJson(`${ESI_BASE}/latest/universe/names/?datasource=tranquility`, {
-        method: "POST",
-        body: JSON.stringify(chunk)
-      });
-      for (const item of data || []) {
-        if (item.category === "solar_system") state.idNameCache.set(Number(item.id), item.name);
-      }
-    }
-    return state.idNameCache;
+    return systemCatalog.resolveIdsToNames(ids);
   }
 
   async function getRoute(originId, destinationId) {
-    const origin = Number(originId);
-    const destination = Number(destinationId);
-    if (origin === destination) return [origin];
-    const cacheKey = `${origin}:${destination}`;
-    if (state.routeCache.has(cacheKey)) return state.routeCache.get(cacheKey);
-
-    await loadSystemCatalog().catch(() => {});
-    const catalogRoute = findCatalogRoute(origin, destination);
-    if (catalogRoute) {
-      state.routeCache.set(cacheKey, catalogRoute);
-      return catalogRoute;
-    }
-
-    let route;
-    try {
-      route = await fetchJson(`${ESI_BASE}/route/${origin}/${destination}`, {
-        method: "POST",
-        body: JSON.stringify({ preference: "Shorter", security_penalty: 50 })
-      });
-      if (route && Array.isArray(route.route)) route = route.route;
-    } catch (err) {
-      if (!/404|405|compatibility/i.test(String(err && err.message))) throw err;
-      route = await fetchJson(
-        `${ESI_BASE}/latest/route/${origin}/${destination}/?datasource=tranquility&flag=shortest`,
-        { method: "GET" }
-      );
-    }
-
-    if (!Array.isArray(route) || !route.length) throw new Error("ESI вернул пустой маршрут.");
-    const normalized = route.map(Number);
-    state.routeCache.set(cacheKey, normalized);
-    return normalized;
-  }
-
-  function findCatalogRoute(origin, destination) {
-    if (!state.systemById.has(origin) || !state.systemById.has(destination)) return null;
-    const queue = [origin];
-    const previous = new Map([[origin, null]]);
-
-    for (let index = 0; index < queue.length; index += 1) {
-      const current = queue[index];
-      const system = state.systemById.get(current);
-      for (const neighbor of system.neighbors) {
-        const id = Number(neighbor);
-        if (previous.has(id)) continue;
-        previous.set(id, current);
-        if (id === destination) {
-          const route = [destination];
-          let cursor = current;
-          while (cursor !== null) {
-            route.push(cursor);
-            cursor = previous.get(cursor) ?? null;
-          }
-          route.reverse();
-          return route;
-        }
-        queue.push(id);
-      }
-    }
-    return null;
-  }
-
-  async function fetchJson(url, options) {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 25000);
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Compatibility-Date": ESI_COMPATIBILITY_DATE,
-          ...(options && options.headers ? options.headers : {})
-        }
-      });
-      if (!response.ok) {
-        let details = "";
-        try { details = JSON.stringify(await response.json()); } catch (_err) { details = response.statusText; }
-        throw new Error(`ESI ${response.status}: ${details}`);
-      }
-      return response.json();
-    } catch (err) {
-      if (err && err.name === "AbortError") throw new Error("ESI не ответил за 25 секунд.");
-      throw err;
-    } finally {
-      window.clearTimeout(timeout);
-    }
+    return systemCatalog.getRoute(originId, destinationId);
   }
 
   function renderRouteMap(routes, emptyMessage = "Активных участков маршрута не осталось.") {
@@ -1879,7 +1623,7 @@
     const viewport = savedView.signature === state.mapSignature
       ? { ...savedView }
       : { signature: state.mapSignature, zoom: 1, viewX: 0, viewY: 0 };
-    if (state.systemById.size) {
+    if (systemCatalog.systemById.size) {
       renderSpatialRouteMap(validRoutes, viewport);
       return;
     }
@@ -1932,7 +1676,7 @@
       const color = safeColor(route.color);
       route.nodes.forEach((node, index) => {
         const id = Number(node.id);
-        if (!state.systemById.has(id)) return;
+        if (!systemCatalog.systemById.has(id)) return;
         routeIds.add(id);
         if (!routeNodeInfo.has(id)) {
           routeNodeInfo.set(id, {
@@ -1956,7 +1700,7 @@
     });
 
     const { visibleIds, includedRegions } = collectRegionalMapSystems(routeIds, startIds, targetIds);
-    const visibleSystems = [...visibleIds].map((id) => state.systemById.get(id)).filter(Boolean);
+    const visibleSystems = [...visibleIds].map((id) => systemCatalog.systemById.get(id)).filter(Boolean);
     if (!visibleSystems.length) {
       renderLinearRouteMap(routes, viewport);
       return;
@@ -1990,7 +1734,7 @@
         seenContextEdges.add(key);
         const from = positions.get(system.id);
         const to = positions.get(neighborId);
-        const neighbor = state.systemById.get(neighborId);
+        const neighbor = systemCatalog.systemById.get(neighborId);
         const edgeClass = neighbor && neighbor.regionId !== system.regionId ? "is-region-link" : "";
         if (from && to) contextEdges.push(`<line class="${edgeClass}" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>`);
       }
@@ -2023,7 +1767,7 @@
 
     const labeledRegionIds = new Set(includedRegions);
     routeIds.forEach((id) => {
-      const regionId = state.systemById.get(id)?.regionId;
+      const regionId = systemCatalog.systemById.get(id)?.regionId;
       if (regionId) labeledRegionIds.add(regionId);
     });
     const regionPoints = new Map();
@@ -2033,7 +1777,7 @@
       regionPoints.get(system.regionId).push(positions.get(system.id));
     });
     const regionLabels = [...regionPoints.entries()].map(([regionId, points]) => {
-      const regionName = state.regionById.get(regionId);
+      const regionName = systemCatalog.regionById.get(regionId);
       if (!regionName || !points.length) return "";
       const minRegionX = Math.min(...points.map((point) => point.x));
       const maxRegionX = Math.max(...points.map((point) => point.x));
@@ -2047,7 +1791,7 @@
     const labelEvery = Math.max(1, Math.ceil(routeNodeInfo.size / 10));
     const routeNodes = [...routeNodeInfo.values()].map((info) => {
       const point = positions.get(info.id);
-      const system = state.systemById.get(info.id);
+      const system = systemCatalog.systemById.get(info.id);
       if (!point || !system) return "";
       const showLabel = info.isStart || info.isTarget || routeNodeInfo.size <= 8 || info.step % labelEvery === 0;
       const classes = ["map-route-node"];
@@ -2084,7 +1828,7 @@
     const visibleIds = new Set(routeIds);
     const regionScores = new Map();
     const scoreRegion = (id, score) => {
-      const system = state.systemById.get(id);
+      const system = systemCatalog.systemById.get(id);
       if (!system || !system.regionId) return;
       regionScores.set(system.regionId, (regionScores.get(system.regionId) || 0) + score);
     };
@@ -2096,13 +1840,13 @@
     const includedRegions = new Set();
     const priorityRegions = new Set();
     [...startIds, ...targetIds].forEach((id) => {
-      const regionId = state.systemById.get(id)?.regionId;
+      const regionId = systemCatalog.systemById.get(id)?.regionId;
       if (regionId) priorityRegions.add(regionId);
     });
     let regionalSystemCount = 0;
     const rankedRegions = [...regionScores.entries()].sort((a, b) => b[1] - a[1]);
     for (const [regionId] of rankedRegions) {
-      const systems = state.systemsByRegion.get(regionId) || [];
+      const systems = systemCatalog.systemsByRegion.get(regionId) || [];
       if (!systems.length) continue;
       const isPriority = priorityRegions.has(regionId);
       if (!isPriority && regionalSystemCount + systems.length > MAP_REGION_SYSTEM_LIMIT) continue;
@@ -2115,10 +1859,10 @@
     for (let depth = 0; depth < 2; depth += 1) {
       const next = [];
       for (const id of frontier) {
-        const system = state.systemById.get(id);
+        const system = systemCatalog.systemById.get(id);
         if (!system) continue;
         for (const neighborId of system.neighbors) {
-          if (!state.systemById.has(neighborId) || visibleIds.has(neighborId)) continue;
+          if (!systemCatalog.systemById.has(neighborId) || visibleIds.has(neighborId)) continue;
           visibleIds.add(neighborId);
           next.push(neighborId);
         }
@@ -2543,12 +2287,6 @@
     return "прыжков";
   }
 
-  function formatUtc(value) {
-    const date = typeof value === "number" ? new Date(value) : new Date(String(value || ""));
-    if (Number.isNaN(date.getTime())) return "—";
-    return `${date.getUTCFullYear()}.${pad(date.getUTCMonth() + 1)}.${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
-  }
-
   function formatSignedDuration(ms) {
     const sign = ms < 0 ? "−" : "+";
     const totalMinutes = Math.floor(Math.abs(ms) / 60000);
@@ -2588,15 +2326,6 @@
     if (security >= 0.5) return "#69aebf";
     if (security > 0) return "#b9a264";
     return "#9b6970";
-  }
-
-  function escapeHtml(value) {
-    return String(value || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
   }
 
   window.EVE_FLEET_ROUTER = {

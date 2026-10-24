@@ -8,8 +8,11 @@ await runBrowserTest("admin view access", async ({ page, context }) => {
     if (location.origin !== "null") {
       localStorage.setItem("eve_timerboard_view_key_main", "view-test-key");
     }
+    window.__clientCreates = (window.__clientCreates || 0);
     window.supabase = {
-      createClient: () => ({
+      createClient: () => {
+        window.__clientCreates += 1;
+        return ({
         rpc: async (name, args) => {
           if (name === "list_fleets_admin") return args.p_admin_key === "admin-test-key"
             ? { data: [], error: null }
@@ -17,12 +20,14 @@ await runBrowserTest("admin view access", async ({ page, context }) => {
           if (name === "get_timers") return { data: initialTimers, error: null };
           return { data: [], error: null };
         }
-      })
+        });
+      }
     };
   }, timers);
   await blockExternalRequests(page);
   await page.goto(`${baseURL}/#board`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('tr[data-timer-id="timer-1"]');
+  assert.equal(await page.evaluate(() => window.__clientCreates), 1);
   assert.equal(await page.locator("#viewModeBtn").textContent(), "Вид: пользователь");
   assert.equal(await page.locator("#adminPanel").evaluate((element) => element.hidden), true);
   assert.equal(await page.locator("#timersBody .table-control").count(), 0);
