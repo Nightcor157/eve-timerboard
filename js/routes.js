@@ -11,6 +11,7 @@
   const GENERAL_SERVICE_KEY = `eve_timerboard_route_service_${BOARD_ID}`;
   const MAP_HEIGHT_KEY = `eve_timerboard_route_map_height_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
+  const REGION_CATALOG_URL = "data/regions.json?v=20261024";
   const MAP_MIN_ZOOM = 1;
   const MAP_MAX_ZOOM = 16;
   const MAP_REGION_SYSTEM_LIMIT = 900;
@@ -45,6 +46,7 @@
     systemById: new Map(),
     systemByName: new Map(),
     systemsByRegion: new Map(),
+    regionById: new Map(),
     systemCatalogPromise: null,
     autocompleteInput: null,
     autocompleteItems: [],
@@ -1461,14 +1463,23 @@
   async function loadSystemCatalog() {
     if (state.systemCatalog.length) return state.systemCatalog;
     if (state.systemCatalogPromise) return state.systemCatalogPromise;
-    state.systemCatalogPromise = fetch(SYSTEM_CATALOG_URL)
-      .then((response) => {
+    state.systemCatalogPromise = Promise.all([
+      fetch(SYSTEM_CATALOG_URL).then((response) => {
         if (!response.ok) throw new Error(`Каталог систем не загрузился: HTTP ${response.status}`);
         return response.json();
-      })
-      .then((payload) => {
+      }),
+      fetch(REGION_CATALOG_URL)
+        .then((response) => response.ok ? response.json() : { regions: [] })
+        .catch(() => ({ regions: [] }))
+    ])
+      .then(([payload, regionPayload]) => {
         const systems = Array.isArray(payload.systems) ? payload.systems : [];
         if (!systems.length) throw new Error("Каталог систем пуст.");
+        const regions = Array.isArray(regionPayload.regions) ? regionPayload.regions : [];
+        regions.forEach((region) => {
+          const id = Number(region.id);
+          if (id && region.name) state.regionById.set(id, String(region.name));
+        });
         state.systemCatalog = systems;
         for (const system of systems) {
           const normalized = {
@@ -1920,6 +1931,29 @@
         </g>`;
       });
 
+    const labeledRegionIds = new Set(includedRegions);
+    routeIds.forEach((id) => {
+      const regionId = state.systemById.get(id)?.regionId;
+      if (regionId) labeledRegionIds.add(regionId);
+    });
+    const regionPoints = new Map();
+    visibleSystems.forEach((system) => {
+      if (!system.regionId || !labeledRegionIds.has(system.regionId) || !positions.has(system.id)) return;
+      if (!regionPoints.has(system.regionId)) regionPoints.set(system.regionId, []);
+      regionPoints.get(system.regionId).push(positions.get(system.id));
+    });
+    const regionLabels = [...regionPoints.entries()].map(([regionId, points]) => {
+      const regionName = state.regionById.get(regionId);
+      if (!regionName || !points.length) return "";
+      const minRegionX = Math.min(...points.map((point) => point.x));
+      const maxRegionX = Math.max(...points.map((point) => point.x));
+      const minRegionY = Math.min(...points.map((point) => point.y));
+      const maxRegionY = Math.max(...points.map((point) => point.y));
+      const x = (minRegionX + maxRegionX) / 2;
+      const y = (minRegionY + maxRegionY) / 2;
+      return `<text class="map-region-label" data-region-id="${regionId}" x="${x}" y="${y}">${escapeHtml(regionName)}</text>`;
+    });
+
     const labelEvery = Math.max(1, Math.ceil(routeNodeInfo.size / 10));
     const routeNodes = [...routeNodeInfo.values()].map((info) => {
       const point = positions.get(info.id);
@@ -1947,6 +1981,7 @@
       <div class="route-map-stage" data-region-count="${includedRegions.size}" data-system-count="${visibleSystems.length}">
         <svg viewBox="0 0 ${width} ${height}" data-base-view-box="0 0 ${width} ${height}" role="img" aria-label="Карта маршрутов по координатам EVE" preserveAspectRatio="xMidYMid meet">
           <g class="map-context-edges">${contextEdges.join("")}</g>
+          <g class="map-region-labels" aria-hidden="true">${regionLabels.join("")}</g>
           <g class="map-context-nodes">${contextNodes.join("")}</g>
           <g class="map-route-edges">${routeEdges.join("")}</g>
           <g class="map-route-nodes">${routeNodes.join("")}</g>
@@ -2236,6 +2271,8 @@
     els.routeMap.style.setProperty("--route-label-font-size", `${13 * labelGrowth * viewportCompensation / state.mapZoom}px`);
     els.routeMap.style.setProperty("--route-meta-font-size", `${11 * labelGrowth * viewportCompensation / state.mapZoom}px`);
     els.routeMap.style.setProperty("--route-label-stroke-width", `${4 * viewportCompensation / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--region-label-font-size", `${28 * viewportCompensation / state.mapZoom}px`);
+    els.routeMap.style.setProperty("--region-label-stroke-width", `${5 * viewportCompensation / state.mapZoom}px`);
     const markerScale = markerGrowth * viewportCompensation / state.mapZoom;
     els.routeMap.style.setProperty("--route-marker-scale", String(markerScale));
     els.routeMap.style.setProperty("--route-edge-stroke-width", `${4 * markerScale}px`);

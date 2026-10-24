@@ -95,6 +95,7 @@
     sortSelect: document.getElementById("sortSelect"),
     showEnded: document.getElementById("showEnded"),
     endedWindow: document.getElementById("endedWindow"),
+    clearHistoryBtn: document.getElementById("clearHistoryBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
     exportCsvBtn: document.getElementById("exportCsvBtn"),
     statActive: document.getElementById("statActive"),
@@ -147,6 +148,7 @@
     els.sortSelect.addEventListener("change", renderTimers);
     els.showEnded.addEventListener("change", renderTimers);
     els.endedWindow.addEventListener("change", renderTimers);
+    els.clearHistoryBtn.addEventListener("click", clearTimerHistory);
     els.exportCsvBtn.addEventListener("click", exportCsv);
     els.viewModeBtn.addEventListener("click", toggleAdminView);
     els.adminAccessForm.addEventListener("submit", submitAdminAccess);
@@ -273,6 +275,7 @@
     document.querySelectorAll("th.admin-only").forEach((element) => {
       element.hidden = !adminViewEnabled;
     });
+    els.clearHistoryBtn.hidden = !adminViewEnabled;
     els.viewModeBtn.textContent = adminViewEnabled ? "Вид: админ" : "Вид: пользователь";
     els.viewModeBtn.classList.toggle("is-admin", adminViewEnabled);
     els.viewModeBtn.setAttribute("aria-pressed", String(adminViewEnabled));
@@ -544,6 +547,49 @@
       await loadTimers();
     } catch (err) {
       setStatus(`Ошибка удаления: ${friendlyDbError(err)}`, true);
+    }
+  }
+
+  async function clearTimerHistory() {
+    if (!adminViewEnabled) return;
+    const now = Date.now();
+    const completedCount = timers.filter((timer) => getTimerState(timer, now).isCompleted).length;
+    if (!completedCount) {
+      setStatus("История уже пуста: завершённых таймеров нет.", false);
+      return;
+    }
+    if (!window.confirm(
+      `Удалить всю историю завершённых таймеров (${completedCount})?\n\nАктивные таймеры и таймеры в фазе ремонта останутся.`
+    )) return;
+
+    els.clearHistoryBtn.disabled = true;
+    try {
+      let deletedCount = completedCount;
+      if (db) {
+        const adminKey = els.adminKey.value.trim();
+        if (!adminKey) {
+          setStatus("Для очистки истории нужен админ-ключ.", true);
+          return;
+        }
+        const { data, error } = await db.rpc("clear_timer_history", {
+          p_board_id: BOARD_ID,
+          p_admin_key: adminKey
+        });
+        if (error) throw error;
+        const rpcCount = Number(data);
+        if (Number.isFinite(rpcCount)) deletedCount = rpcCount;
+      } else {
+        const local = readLocalTimers();
+        const active = local.filter((timer) => !getTimerState(normalizeTimer(timer), now).isCompleted);
+        deletedCount = local.length - active.length;
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(active));
+      }
+      setStatus(`История очищена. Удалено таймеров: ${deletedCount}.`, false);
+      await loadTimers();
+    } catch (err) {
+      setStatus(`Ошибка очистки истории: ${friendlyDbError(err)}`, true);
+    } finally {
+      els.clearHistoryBtn.disabled = false;
     }
   }
 
@@ -1421,6 +1467,7 @@
     if (/set_timerboard_view_key/i.test(message)) return "в Supabase нужно выполнить SQL для ключа просмотра";
     if (/get_timers/i.test(message)) return "в Supabase нужно выполнить SQL для ключа просмотра";
     if (/wrong admin key|28000|invalid/i.test(message)) return "неверный админ-ключ";
+    if (/clear_timer_history/i.test(message)) return "в Supabase нужно обновить полную схему из supabase/schema.sql";
     if (/update_timer_admin_fields/i.test(message)) return "в Supabase нужно добавить функцию update_timer_admin_fields";
     if (/function .* does not exist|schema cache|add_timer/i.test(message)) return "SQL-схема Supabase не установлена или не обновлена";
     return message;

@@ -417,6 +417,38 @@ begin
 end;
 $$;
 
+-- Удаляет только завершённую историю. Активные таймеры и текущие окна ремонта
+-- остаются на доске. Условия совпадают с фазами в js/app.js.
+create or replace function public.clear_timer_history(
+  p_board_id text,
+  p_admin_key text
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_deleted integer;
+begin
+  perform public.assert_timerboard_admin(trim(p_board_id), p_admin_key);
+
+  delete from public.timers
+  where board_id = trim(p_board_id)
+    and (
+      note in ('Защищена', 'Уничтожена')
+      or end_at + case
+        when object_name = 'Customs Office' then interval '2 hours'
+        when object_name in ('Metenox Moon Drill', 'IHub', 'TCU', 'POS') then interval '30 minutes'
+        else interval '15 minutes'
+      end <= now()
+    );
+
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
 create or replace function public.assert_fleet_access(
   p_board_id text,
   p_fleet_id uuid,
@@ -923,6 +955,8 @@ revoke all on function public.assert_timerboard_viewer(text, text)
 from public, anon, authenticated;
 revoke all on function public.assert_fleet_access(text, uuid, text)
 from public, anon, authenticated;
+revoke all on function public.clear_timer_history(text, text)
+from public, anon, authenticated;
 
 grant execute on function public.get_timers(text, text)
 to anon, authenticated;
@@ -935,6 +969,8 @@ grant execute on function public.update_timer_admin_fields(
   text, text, uuid, text, text, text, text, text, text, text, timestamptz, text
 ) to anon, authenticated;
 grant execute on function public.delete_timer(text, text, uuid)
+to anon, authenticated;
+grant execute on function public.clear_timer_history(text, text)
 to anon, authenticated;
 grant execute on function public.list_fleets(text, text)
 to anon, authenticated;

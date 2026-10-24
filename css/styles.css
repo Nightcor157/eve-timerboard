@@ -1183,6 +1183,22 @@ input.system-autocomplete.is-invalid {
   opacity: 0.72;
 }
 
+.map-region-label {
+  fill: #79909a;
+  stroke: #06131c;
+  stroke-width: var(--region-label-stroke-width, 5px);
+  paint-order: stroke;
+  stroke-linejoin: round;
+  font-size: var(--region-label-font-size, 28px);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  opacity: 0.24;
+  pointer-events: none;
+  user-select: none;
+}
+
 .map-context-node circle {
   stroke: #06131c;
   stroke-width: 1.2;
