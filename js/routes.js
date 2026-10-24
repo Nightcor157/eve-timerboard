@@ -793,17 +793,32 @@
         <div><strong>${escapeHtml(formatUtc(recommended.eta))}</strong><span>ETA, EVE/UTC</span></div>
         <div><strong class="route-margin ${recommended.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(recommended.marginMs))}</strong><span>запас</span></div>
       </div>
-      ${candidates.slice(0, 20).map((candidate, index) => `
-        <div class="route-list-row ${candidate.marginMs < 0 ? "is-late" : ""}">
-          <div class="route-list-order">${index + 1}</div>
-          <div><div class="route-list-system">${escapeHtml(candidate.timer.system)}</div><div class="route-list-meta">${escapeHtml(candidate.timer.object_name || "объект не указан")}</div></div>
-          <div>${escapeHtml(candidate.timer.structure || "—")}</div>
-          <div>${escapeHtml(formatJumpCount(candidate.jumps))}</div>
-          <div>${escapeHtml(formatUtc(candidate.eta))}</div>
-          <div class="route-margin ${candidate.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(candidate.marginMs))}</div>
-          <div class="route-list-meta">${secondsPerJump} сек/прыжок · ${serviceMinutes} мин/цель</div>
-        </div>
-      `).join("")}`;
+      <div class="route-table-wrap">
+        <table class="route-table route-table-general">
+          ${renderRouteTableHead(false)}
+          <tbody>
+            ${candidates.map((candidate, index) => `
+              <tr class="route-list-row ${candidate.marginMs < 0 ? "is-late" : ""}">
+                <td class="route-list-order">${index + 1}</td>
+                <td class="route-list-system">${escapeHtml(candidate.timer.system)}</td>
+                <td>${routeValue(candidate.timer.object_name)}</td>
+                <td>${routeValue(candidate.timer.structure)}</td>
+                <td>${routeValue(candidate.timer.title)}</td>
+                <td>${routeValue(candidate.timer.owner)}</td>
+                <td>${routeValue(candidate.timer.mode)}</td>
+                <td>${renderTimerKind(candidate.timer.distance)}</td>
+                <td>${escapeHtml(formatJumpCount(candidate.jumps))}</td>
+                <td class="route-time-cell">${escapeHtml(formatUtc(candidate.eta))}</td>
+                <td class="route-time-cell">${escapeHtml(formatUtc(candidate.timer.end_at))}</td>
+                <td class="route-margin ${candidate.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(candidate.marginMs))}</td>
+                <td>${renderRouteArrivalStatus(candidate.marginMs)}</td>
+                <td><div class="route-result-summary">${renderReadonlyResult(candidate.timer.note)}</div></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+      <div class="route-list-note">Расчёт: ${secondsPerJump} сек/прыжок · ${serviceMinutes} мин/цель</div>`;
   }
 
   function restoreSelectedFleetKey() {
@@ -937,22 +952,87 @@
 
   function renderFleetRouteRows(rows) {
     const sorted = rows.slice().sort((a, b) => String(a.fleet_name).localeCompare(String(b.fleet_name), "ru") || a.route_order - b.route_order);
-    els.routeList.innerHTML = sorted.map((row) => {
-      const marginMs = new Date(row.end_at).getTime() - new Date(row.eta_at).getTime();
-      const result = normalizeResult(row.result);
-      return `
-        <div class="route-list-row ${marginMs < 0 ? "is-late" : ""}" data-timer-id="${escapeHtml(row.timer_id)}" data-fleet-id="${escapeHtml(row.fleet_id)}">
-          <div class="route-list-order">${Number(row.route_order)}</div>
-          <div><div class="route-list-system">${escapeHtml(row.timer_system)}</div><div class="route-list-meta">${escapeHtml(row.fleet_name)}</div></div>
-          <div><div>${escapeHtml(row.object_name || "—")}</div><div class="route-list-meta">${escapeHtml(row.structure || "")}</div></div>
-          <div>${escapeHtml(formatJumpCount(row.jump_count))}</div>
-          <div><div>${escapeHtml(formatUtc(row.eta_at))}</div><div class="route-list-meta">таймер ${escapeHtml(formatUtc(row.end_at))}</div></div>
-          <div class="route-margin ${marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(marginMs))}</div>
-          <div class="route-result-summary">
-            ${renderRouteResultControl(row, result)}
-          </div>
-        </div>`;
-    }).join("");
+    els.routeList.innerHTML = `
+      <div class="route-table-wrap">
+        <table class="route-table">
+          ${renderRouteTableHead(true)}
+          <tbody>
+            ${sorted.map((row) => {
+              const marginMs = new Date(row.end_at).getTime() - new Date(row.eta_at).getTime();
+              const result = normalizeResult(row.result);
+              return `
+                <tr class="route-list-row ${marginMs < 0 ? "is-late" : ""}" data-timer-id="${escapeHtml(row.timer_id)}" data-fleet-id="${escapeHtml(row.fleet_id)}">
+                  <td class="route-list-order">${Number(row.route_order)}</td>
+                  <td><span class="route-fleet-cell"><span class="route-legend-swatch" style="--fleet-color:${safeColor(row.fleet_color || "#27a7d8")}"></span>${escapeHtml(row.fleet_name)}</span></td>
+                  <td class="route-list-system">${escapeHtml(row.timer_system)}</td>
+                  <td>${routeValue(row.object_name)}</td>
+                  <td>${routeValue(row.structure)}</td>
+                  <td>${routeValue(row.corporation)}</td>
+                  <td>${routeValue(row.alliance)}</td>
+                  <td>${routeValue(row.mode)}</td>
+                  <td>${renderTimerKind(row.timer_kind)}</td>
+                  <td>${escapeHtml(formatJumpCount(row.jump_count))}</td>
+                  <td class="route-time-cell">${escapeHtml(formatUtc(row.eta_at))}</td>
+                  <td class="route-time-cell">${escapeHtml(formatUtc(row.end_at))}</td>
+                  <td class="route-margin ${marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(marginMs))}</td>
+                  <td>${renderRouteArrivalStatus(marginMs)}</td>
+                  <td><div class="route-result-summary">${renderRouteResultControl(row, result)}</div></td>
+                </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderRouteTableHead(showFleet) {
+    return `
+      <thead>
+        <tr>
+          <th>№</th>
+          ${showFleet ? "<th>Флот</th>" : ""}
+          <th>Система</th>
+          <th>Объект</th>
+          <th>Структура</th>
+          <th>Корпорация</th>
+          <th>Альянс</th>
+          <th>Режим</th>
+          <th>Таймер</th>
+          <th>Прыжки</th>
+          <th>ETA, EVE/UTC</th>
+          <th>Укреплён до, EVE/UTC</th>
+          <th>Запас</th>
+          <th>Статус</th>
+          <th>Итог</th>
+        </tr>
+      </thead>`;
+  }
+
+  function routeValue(value) {
+    return escapeHtml(String(value || "").trim() || "—");
+  }
+
+  function renderTimerKind(value) {
+    const kind = String(value || "").trim();
+    if (!kind) return '<span class="route-list-meta">—</span>';
+    const className = /^атака$/i.test(kind)
+      ? "is-attack-kind"
+      : /^оборона$/i.test(kind)
+        ? "is-defense-kind"
+        : "";
+    return `<span class="timer-kind-badge ${className}">${escapeHtml(kind)}</span>`;
+  }
+
+  function renderRouteArrivalStatus(marginMs) {
+    return marginMs >= 0
+      ? '<span class="route-arrival-status is-on-time">Вовремя</span>'
+      : '<span class="route-arrival-status is-delayed">Опоздание</span>';
+  }
+
+  function renderReadonlyResult(value) {
+    const result = normalizeResult(value);
+    return result
+      ? `<span class="result-badge ${resultClass(result)}">${escapeHtml(result)}</span>`
+      : '<span class="route-list-meta">Не поставлен</span>';
   }
 
   function renderRouteResultControl(row, result) {

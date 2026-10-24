@@ -1123,19 +1123,61 @@ input.system-autocomplete.is-invalid {
 }
 
 .route-list {
-  border-top: 1px solid var(--border);
+  width: 100%;
+  margin-top: 0.4rem;
 }
 
-.route-list-row {
-  display: grid;
-  grid-template-columns: 3.5rem minmax(8rem, 1fr) minmax(9rem, 1fr) 7rem 10rem 9rem minmax(16rem, auto);
-  gap: 0.65rem;
-  align-items: center;
-  padding: 0.75rem 0;
+.route-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  scrollbar-color: #42677a #071722;
+}
+
+.route-table {
+  width: 100%;
+  min-width: 1850px;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.route-table-general {
+  min-width: 1720px;
+}
+
+.route-table th,
+.route-table td {
+  padding: 0.62rem 0.55rem;
+  border-right: 1px solid rgba(96, 139, 157, 0.25);
   border-bottom: 1px solid rgba(96, 139, 157, 0.25);
+  vertical-align: middle;
 }
 
-.route-list-row.is-late {
+.route-table th {
+  color: #9bb3bc;
+  background: #0a465d;
+  white-space: nowrap;
+}
+
+.route-table td {
+  color: #9fb6bf;
+}
+
+.route-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.route-table th:last-child,
+.route-table td:last-child {
+  border-right: 0;
+}
+
+.route-list-row:nth-child(even) td {
+  background: rgba(7, 23, 34, 0.28);
+}
+
+.route-list-row.is-late td {
   background: rgba(123, 45, 45, 0.12);
 }
 
@@ -1147,6 +1189,7 @@ input.system-autocomplete.is-invalid {
 .route-list-system {
   font-weight: 700;
   color: #b7cbd1;
+  white-space: nowrap;
 }
 
 .route-list-meta {
@@ -1160,11 +1203,53 @@ input.system-autocomplete.is-invalid {
 .route-result-summary {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .route-result-actions {
   width: 100%;
+}
+
+.route-fleet-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.route-time-cell,
+.route-margin {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-arrival-status {
+  display: inline-flex;
+  min-width: 5.3rem;
+  justify-content: center;
+  padding: 0.3rem 0.48rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.route-arrival-status.is-on-time {
+  color: #91b19b;
+  background: rgba(72, 151, 98, 0.12);
+  border-color: rgba(72, 151, 98, 0.3);
+}
+
+.route-arrival-status.is-delayed {
+  color: #c09494;
+  background: rgba(190, 78, 78, 0.12);
+  border-color: rgba(190, 78, 78, 0.3);
+}
+
+.route-list-note {
+  margin-top: 0.55rem;
+  color: #829eaa;
+  font-size: 0.84rem;
 }
 
 .route-recommendation {
@@ -1212,12 +1297,6 @@ input.system-autocomplete.is-invalid {
   .fleet-profile-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .route-list-row {
-    grid-template-columns: 3rem minmax(8rem, 1fr) minmax(8rem, 1fr) 7rem;
-  }
-  .route-list-row > :nth-child(n + 5) {
-    grid-column: span 2;
-  }
   .route-result-summary {
     justify-content: flex-start;
   }
@@ -1232,13 +1311,9 @@ input.system-autocomplete.is-invalid {
   .fleet-login-grid,
   .fleet-create-grid,
   .fleet-profile-row,
-  .route-recommendation,
-  .route-list-row {
+  .route-recommendation {
     width: 100%;
     grid-template-columns: 1fr;
-  }
-  .route-list-row > :nth-child(n + 5) {
-    grid-column: auto;
   }
   .generated-key,
   .fleet-profile-actions {
