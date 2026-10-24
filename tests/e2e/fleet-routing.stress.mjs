@@ -202,6 +202,8 @@ async function runScenario(browser, definition) {
     const startedAt = Date.now();
     await page.click("#calculateFleetRoutesBtn");
     await page.waitForFunction(() => document.querySelector("#fleetAdminStatus")?.textContent.includes("Маршруты рассчитаны"), null, { timeout: 60000 });
+    const plannerStatus = await page.locator("#fleetAdminStatus").textContent();
+    assert.match(plannerStatus, /Опозданий: \d+, прыжков: \d+, разброс нагрузки:/);
     const calculationMs = Date.now() - startedAt;
     const assignments = await page.evaluate(() => window.__assignments);
     const timerById = new Map(timers.map((timer) => [timer.id, timer]));

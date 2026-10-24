@@ -1,6 +1,6 @@
 import { STRUCTURE_TYPES, TIMER_KINDS } from "./core/constants.js";
 import { APP_EVENTS, appController } from "./app-controller.js";
-import { planFleetAssignments, planSequentialRoute } from "./core/route-planner.js";
+import { planFleetAssignmentsV2, planSequentialRoute } from "./core/route-planner.js";
 import { getTimerboardApi, hasSupabaseConfig as isSupabaseConfigured } from "./services/supabase-api.js";
 import { createSystemCatalogService } from "./services/system-catalog.js";
 import { escapeHtml, formatUtc } from "./shared/format.js";
@@ -51,6 +51,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     selectedFleetKey: "",
     boardAccessFleetId: "",
     generalPlan: null,
+    lastPlanMetrics: null,
     loadingFleets: false
   };
 
@@ -613,7 +614,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
         ...targets.map((timer) => timer.system)
       ]);
 
-      const assignments = await planFleetAssignments({
+      const plan = await planFleetAssignmentsV2({
         fleets,
         targets,
         resolveSystem: (name) => resolved.get(normalizeName(name)),
@@ -625,6 +626,7 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
           false
         )
       });
+      const assignments = plan.assignments;
 
       const routeIds = [...new Set(assignments.flatMap((item) => item.route_ids))];
       const routeNames = await resolveIdsToNames(routeIds);
@@ -639,9 +641,10 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
 
       const { data, error } = await db.replaceFleetAssignments(BOARD_ID, getAdminKey(), payload);
       if (error) throw error;
+      state.lastPlanMetrics = { ...plan.metrics, improved: plan.improved };
       setLine(
         els.fleetAdminStatus,
-        `Маршруты рассчитаны. Фильтр: ${describeRouteFilters(filters)}. Назначено целей: ${Number(data || payload.length)}.`,
+        `Маршруты рассчитаны. Фильтр: ${describeRouteFilters(filters)}. Назначено целей: ${Number(data || payload.length)}. ${formatPlanMetrics(state.lastPlanMetrics)}.`,
         false
       );
       await loadAllFleetRoutes();
@@ -952,9 +955,12 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     const visibleActiveCount = rows.filter((row) =>
       !normalizeResult(row.result) && visibleFleetIds.has(String(row.fleet_id))
     ).length;
-    els.routeWorkspaceHint.textContent = state.hiddenFleetIds.size && fleetFilterEnabled
+    const routeSummary = state.hiddenFleetIds.size && fleetFilterEnabled
       ? `Назначено целей: ${rows.length}. На карте показано: ${visibleActiveCount} из ${activeCount} активных.`
       : `Назначено целей: ${rows.length}. На карте осталось: ${activeCount}.`;
+    els.routeWorkspaceHint.textContent = adminViewEnabled && state.lastPlanMetrics
+      ? `${routeSummary} ${formatPlanMetrics(state.lastPlanMetrics)}.`
+      : routeSummary;
     renderFleetRouteRows(rows);
   }
 
@@ -1506,6 +1512,15 @@ import { createSystemAutocomplete } from "./ui/system-autocomplete.js";
     const hours = Math.floor((totalMinutes % 1440) / 60);
     const minutes = totalMinutes % 60;
     return `${sign}${days ? `${days} д ` : ""}${pad(hours)}:${pad(minutes)}`;
+  }
+
+  function formatPlanMetrics(metrics) {
+    const lateCount = Number(metrics && metrics.lateCount) || 0;
+    const totalJumps = Number(metrics && metrics.totalJumps) || 0;
+    const spreadMinutes = Math.round((Number(metrics && metrics.workloadSpreadMs) || 0) / 6000) / 10;
+    const calculationMs = Number(metrics && metrics.calculationMs) || 0;
+    const optimization = metrics && metrics.improved ? "v2 улучшил baseline" : "baseline сохранён";
+    return `Опозданий: ${lateCount}, прыжков: ${totalJumps}, разброс нагрузки: ${spreadMinutes} мин, ${optimization}, расчёт: ${calculationMs} мс`;
   }
 
   function formatCountdown(ms) {
