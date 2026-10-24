@@ -29,5 +29,5 @@ Before changing this repository, read these files in order:
   `docs/PROJECT_MEMORY.md` and `docs/REFACTORING_ROADMAP.md`, record important
   decisions, and mark the next specification as current.
 - Keep changes incremental. Do not combine a behavior rewrite, visual redesign,
-  and database migration in one step unless the specification requires it.
+  and database schema update in one step unless the specification requires it.
 

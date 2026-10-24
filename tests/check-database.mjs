@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { projectRoot } from "./helpers/server.mjs";
 
 const schema = await readFile(resolve(projectRoot, "supabase/schema.sql"), "utf8");
-const migrationDirectory = resolve(projectRoot, "supabase/migrations");
-const migrationFiles = (await readdir(migrationDirectory)).filter((file) => file.endsWith(".sql")).sort();
-const migrations = await Promise.all(migrationFiles.map((file) => readFile(resolve(migrationDirectory, file), "utf8")));
 const db = await PGlite.create({ extensions: { pgcrypto } });
 
 try {
@@ -78,12 +75,10 @@ try {
   assert.equal(legacy.rows[0].add_timer_exists, true);
   assert.equal(legacy.rows[0].update_timer_exists, true);
 
-  await db.exec(schema);
-  assert.equal(await timerCount(db), countBeforeFailure);
   for (let pass = 0; pass < 2; pass += 1) {
-    for (const migration of migrations) await db.exec(migration);
+    await db.exec(schema);
+    assert.equal(await timerCount(db), countBeforeFailure);
   }
-  assert.equal(await timerCount(db), countBeforeFailure);
 
   await assert.rejects(
     db.query("select public.setup_timerboard($1, $2)", ["short-key-board", "too-short"]),
@@ -108,7 +103,7 @@ try {
     `),
     /timers_distance_values_chk/i
   );
-  console.log(`PASS Supabase schema, ${migrations.length} migrations and data safety`);
+  console.log("PASS unified Supabase schema reapplied twice and data safety");
 } finally {
   await db.close();
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { projectRoot } from "./helpers/server.mjs";
 
@@ -10,20 +10,8 @@ assert.match(html, /connect-src 'self' https:\/\/\*\.supabase\.co https:\/\/esi\
 assert.match(html, /@supabase\/supabase-js@2\.118\.0/);
 assert.doesNotMatch(html, /@supabase\/supabase-js@2(?:["/])/);
 
-const migrationDirectory = resolve(projectRoot, "supabase/migrations");
-const migrationFiles = (await readdir(migrationDirectory)).filter((file) => file.endsWith(".sql")).sort();
-assert.deepEqual(migrationFiles, [
-  "20261024_001_atomic_timer_writes.sql",
-  "20261024_002_security_hardening.sql",
-  "20261024_003_clear_timer_history.sql"
-]);
-for (const file of migrationFiles) {
-  const sql = await readFile(resolve(migrationDirectory, file), "utf8");
-  assert.doesNotMatch(sql, /\b(?:drop\s+table|truncate)\b/i, `${file} contains destructive SQL`);
-  if (/delete\s+from\s+public\.timers/i.test(sql)) {
-    assert.equal(file, "20261024_003_clear_timer_history.sql");
-    assert.match(sql, /create or replace function public\.clear_timer_history[\s\S]*perform public\.assert_timerboard_admin[\s\S]*delete from public\.timers/i);
-  }
-}
+const sql = await readFile(resolve(projectRoot, "supabase/schema.sql"), "utf8");
+assert.doesNotMatch(sql, /\b(?:drop\s+table|truncate)\b/i, "schema.sql contains destructive setup SQL");
+assert.match(sql, /create or replace function public\.clear_timer_history[\s\S]*perform public\.assert_timerboard_admin[\s\S]*delete from public\.timers/i);
 
-console.log("PASS pinned browser dependency, CSP and migration safety");
+console.log("PASS pinned browser dependency, CSP and unified schema safety");
