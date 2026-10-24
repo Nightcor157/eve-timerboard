@@ -979,6 +979,20 @@ input.system-autocomplete.is-invalid {
     #071722;
   background-size: 32px 32px;
   scrollbar-color: #42677a #071722;
+  overscroll-behavior: contain;
+}
+
+.route-map.has-map {
+  cursor: grab;
+}
+
+.route-map.has-map.is-zoomed {
+  touch-action: none;
+}
+
+.route-map.has-map.is-panning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .route-map-stage {
@@ -1013,19 +1027,42 @@ input.system-autocomplete.is-invalid {
 }
 
 .map-context-edges line {
-  stroke: #294657;
-  stroke-width: 1.2;
-  opacity: 0.5;
+  stroke: #355564;
+  stroke-width: 1.05;
+  opacity: 0.52;
+}
+
+.map-context-edges line.is-region-link {
+  stroke: #8b6d37;
+  stroke-dasharray: 4 4;
+  opacity: 0.72;
 }
 
 .map-context-node circle {
-  opacity: 0.72;
+  stroke: #06131c;
+  stroke-width: 1.2;
+  opacity: 0.84;
   transition: opacity 0.12s ease, r 0.12s ease;
 }
 
 .map-context-node:hover circle {
   r: 4;
   opacity: 1;
+}
+
+.map-context-label {
+  display: none;
+  fill: #91aab3;
+  font-size: 9px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #06131c;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.route-map.is-context-labeled .map-context-label {
+  display: block;
 }
 
 .map-route-edges .route-edge-underlay {

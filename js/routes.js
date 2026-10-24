@@ -10,6 +10,9 @@
   const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
   const GENERAL_SERVICE_KEY = `eve_timerboard_route_service_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
+  const MAP_MIN_ZOOM = 1;
+  const MAP_MAX_ZOOM = 4;
+  const MAP_REGION_SYSTEM_LIMIT = 900;
   let viewAccessGranted = document.body.classList.contains("has-view-access");
 
   const hasSupabaseConfig = Boolean(
@@ -39,11 +42,18 @@
     systemCatalog: [],
     systemById: new Map(),
     systemByName: new Map(),
+    systemsByRegion: new Map(),
     systemCatalogPromise: null,
     autocompleteInput: null,
     autocompleteItems: [],
     autocompleteIndex: -1,
     mapZoom: 1,
+    mapSignature: "",
+    mapDrag: null,
+    mapViewByMode: {
+      general: { signature: "", zoom: 1, scrollLeft: 0, scrollTop: 0 },
+      fleet: { signature: "", zoom: 1, scrollLeft: 0, scrollTop: 0 }
+    },
     lastMapRoutes: null,
     loadingFleets: false
   };
@@ -139,6 +149,12 @@
     els.routeZoomOutBtn.addEventListener("click", () => changeRouteZoom(-0.25));
     els.routeZoomResetBtn.addEventListener("click", resetRouteZoom);
     els.routeZoomInBtn.addEventListener("click", () => changeRouteZoom(0.25));
+    els.routeMap.addEventListener("wheel", handleRouteMapWheel, { passive: false });
+    els.routeMap.addEventListener("pointerdown", startRouteMapPan);
+    els.routeMap.addEventListener("pointermove", moveRouteMapPan);
+    els.routeMap.addEventListener("pointerup", stopRouteMapPan);
+    els.routeMap.addEventListener("pointercancel", stopRouteMapPan);
+    els.routeMap.addEventListener("scroll", saveRouteViewport, { passive: true });
 
     els.createFleetBtn.addEventListener("click", createFleet);
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
@@ -210,6 +226,9 @@
   }
 
   function setMapMode(mode) {
+    if (state.mapViewByMode[state.mapMode].signature === state.mapSignature) {
+      saveRouteViewport();
+    }
     state.mapMode = mode;
     const general = mode === "general";
     els.generalMapModeBtn.classList.toggle("is-selected", general);
@@ -1229,10 +1248,15 @@
             x: Number(system.x),
             y: Number(system.y),
             security: Number(system.security || 0),
+            regionId: Number(system.regionId || 0),
             neighbors: Array.isArray(system.neighbors) ? system.neighbors.map(Number) : []
           };
           state.systemById.set(normalized.id, normalized);
           state.systemByName.set(normalizeName(normalized.name), normalized);
+          if (!state.systemsByRegion.has(normalized.regionId)) {
+            state.systemsByRegion.set(normalized.regionId, []);
+          }
+          state.systemsByRegion.get(normalized.regionId).push(normalized);
           state.nameCache.set(normalizeName(normalized.name), { id: normalized.id, name: normalized.name });
           state.idNameCache.set(normalized.id, normalized.name);
         }
@@ -1516,23 +1540,40 @@
       return;
     }
 
+    if (state.mapViewByMode[state.mapMode].signature === state.mapSignature) {
+      saveRouteViewport();
+    }
     state.lastMapRoutes = validRoutes;
+    state.mapSignature = createRouteMapSignature(validRoutes);
+    const savedView = state.mapViewByMode[state.mapMode];
+    const viewport = savedView.signature === state.mapSignature
+      ? { ...savedView }
+      : { signature: state.mapSignature, zoom: 1, scrollLeft: 0, scrollTop: 0 };
     if (state.systemById.size) {
-      renderSpatialRouteMap(validRoutes);
+      renderSpatialRouteMap(validRoutes, viewport);
       return;
     }
 
-    renderLinearRouteMap(validRoutes);
+    renderLinearRouteMap(validRoutes, viewport);
     loadSystemCatalog().then(() => {
-      if (state.lastMapRoutes === validRoutes) renderSpatialRouteMap(validRoutes);
+      if (state.lastMapRoutes === validRoutes) renderSpatialRouteMap(validRoutes, viewport);
     }).catch(() => {});
   }
 
-  function renderSpatialRouteMap(routes) {
+  function createRouteMapSignature(routes) {
+    return routes.map((route) => {
+      const targets = route.targetIds ? [...route.targetIds].map(Number).sort((a, b) => a - b) : [];
+      return `${route.name || "route"}:${route.nodes.map((node) => Number(node.id)).join(",")}:${targets.join(",")}`;
+    }).join("|");
+  }
+
+  function renderSpatialRouteMap(routes, viewport) {
     const width = 1400;
     const height = 760;
     const padding = 72;
     const routeIds = new Set();
+    const startIds = new Set();
+    const targetIds = new Set();
     const routeNodeInfo = new Map();
 
     routes.forEach((route) => {
@@ -1555,23 +1596,17 @@
         const isTarget = Boolean(route.targetIds && route.targetIds.has(id));
         info.isStart = info.isStart || index === 0;
         info.isTarget = info.isTarget || isTarget;
+        if (index === 0) startIds.add(id);
+        if (isTarget) targetIds.add(id);
         if (isTarget) info.color = color;
         info.step = Math.min(info.step, index);
       });
     });
 
-    const visibleIds = new Set(routeIds);
-    routeIds.forEach((id) => {
-      const system = state.systemById.get(id);
-      if (!system) return;
-      system.neighbors.forEach((neighborId) => {
-        if (state.systemById.has(neighborId)) visibleIds.add(neighborId);
-      });
-    });
-
+    const { visibleIds, includedRegions } = collectRegionalMapSystems(routeIds, startIds, targetIds);
     const visibleSystems = [...visibleIds].map((id) => state.systemById.get(id)).filter(Boolean);
     if (!visibleSystems.length) {
-      renderLinearRouteMap(routes);
+      renderLinearRouteMap(routes, viewport);
       return;
     }
 
@@ -1598,13 +1633,14 @@
     for (const system of visibleSystems) {
       for (const neighborId of system.neighbors) {
         if (!visibleIds.has(neighborId)) continue;
-        if (!routeIds.has(system.id) && !routeIds.has(neighborId)) continue;
         const key = system.id < neighborId ? `${system.id}:${neighborId}` : `${neighborId}:${system.id}`;
         if (seenContextEdges.has(key)) continue;
         seenContextEdges.add(key);
         const from = positions.get(system.id);
         const to = positions.get(neighborId);
-        if (from && to) contextEdges.push(`<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>`);
+        const neighbor = state.systemById.get(neighborId);
+        const edgeClass = neighbor && neighbor.regionId !== system.regionId ? "is-region-link" : "";
+        if (from && to) contextEdges.push(`<line class="${edgeClass}" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"></line>`);
       }
     }
 
@@ -1624,8 +1660,9 @@
       .filter((system) => !routeIds.has(system.id))
       .map((system) => {
         const point = positions.get(system.id);
-        return `<g class="map-context-node" transform="translate(${point.x} ${point.y})">
-          <circle r="2.5" fill="${securityColor(system.security)}"></circle>
+        return `<g class="map-context-node" data-region-id="${system.regionId}" transform="translate(${point.x} ${point.y})">
+          <circle r="3.5" fill="${securityColor(system.security)}"></circle>
+          <text class="map-context-label" x="7" y="-6">${escapeHtml(system.name)}</text>
           <title>${escapeHtml(system.name)} (${formatSecurity(system.security)})</title>
         </g>`;
       });
@@ -1651,9 +1688,10 @@
       </g>`;
     });
 
-    state.mapZoom = 1;
+    state.mapZoom = normalizeMapZoom(viewport && viewport.zoom);
+    els.routeMap.classList.add("has-map");
     els.routeMap.innerHTML = `
-      <div class="route-map-stage">
+      <div class="route-map-stage" data-region-count="${includedRegions.size}" data-system-count="${visibleSystems.length}">
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Карта маршрутов по координатам EVE" preserveAspectRatio="xMidYMid meet">
           <g class="map-context-edges">${contextEdges.join("")}</g>
           <g class="map-context-nodes">${contextNodes.join("")}</g>
@@ -1661,10 +1699,59 @@
           <g class="map-route-nodes">${routeNodes.join("")}</g>
         </svg>
       </div>`;
-    applyRouteZoom();
+    restoreRouteViewport(viewport);
   }
 
-  function renderLinearRouteMap(validRoutes) {
+  function collectRegionalMapSystems(routeIds, startIds, targetIds) {
+    const visibleIds = new Set(routeIds);
+    const regionScores = new Map();
+    const scoreRegion = (id, score) => {
+      const system = state.systemById.get(id);
+      if (!system || !system.regionId) return;
+      regionScores.set(system.regionId, (regionScores.get(system.regionId) || 0) + score);
+    };
+
+    routeIds.forEach((id) => scoreRegion(id, 1));
+    startIds.forEach((id) => scoreRegion(id, 1000));
+    targetIds.forEach((id) => scoreRegion(id, 2000));
+
+    const includedRegions = new Set();
+    const priorityRegions = new Set();
+    [...startIds, ...targetIds].forEach((id) => {
+      const regionId = state.systemById.get(id)?.regionId;
+      if (regionId) priorityRegions.add(regionId);
+    });
+    let regionalSystemCount = 0;
+    const rankedRegions = [...regionScores.entries()].sort((a, b) => b[1] - a[1]);
+    for (const [regionId] of rankedRegions) {
+      const systems = state.systemsByRegion.get(regionId) || [];
+      if (!systems.length) continue;
+      const isPriority = priorityRegions.has(regionId);
+      if (!isPriority && regionalSystemCount + systems.length > MAP_REGION_SYSTEM_LIMIT) continue;
+      includedRegions.add(regionId);
+      regionalSystemCount += systems.length;
+      systems.forEach((system) => visibleIds.add(system.id));
+    }
+
+    let frontier = [...routeIds];
+    for (let depth = 0; depth < 2; depth += 1) {
+      const next = [];
+      for (const id of frontier) {
+        const system = state.systemById.get(id);
+        if (!system) continue;
+        for (const neighborId of system.neighbors) {
+          if (!state.systemById.has(neighborId) || visibleIds.has(neighborId)) continue;
+          visibleIds.add(neighborId);
+          next.push(neighborId);
+        }
+      }
+      frontier = next;
+    }
+
+    return { visibleIds, includedRegions };
+  }
+
+  function renderLinearRouteMap(validRoutes, viewport) {
 
     const compact = window.matchMedia("(max-width: 560px)").matches;
     const maxNodeCount = Math.max(...validRoutes.map((route) => route.nodes.length));
@@ -1714,7 +1801,8 @@
       });
     });
 
-    state.mapZoom = 1;
+    state.mapZoom = normalizeMapZoom(viewport && viewport.zoom);
+    els.routeMap.classList.add("has-map");
     els.routeMap.innerHTML = `
       <div class="route-map-stage">
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Схема маршрутов флотов" preserveAspectRatio="xMidYMid meet">
@@ -1722,26 +1810,87 @@
           ${nodeParts.join("")}
         </svg>
       </div>`;
-    applyRouteZoom();
+    restoreRouteViewport(viewport);
   }
 
   function changeRouteZoom(delta) {
-    const previous = state.mapZoom;
-    state.mapZoom = Math.max(1, Math.min(3, Math.round((state.mapZoom + delta) * 100) / 100));
-    if (state.mapZoom === previous) return;
-    const centerX = (els.routeMap.scrollLeft + els.routeMap.clientWidth / 2) / Math.max(1, els.routeMap.scrollWidth);
-    const centerY = (els.routeMap.scrollTop + els.routeMap.clientHeight / 2) / Math.max(1, els.routeMap.scrollHeight);
+    setRouteZoom(state.mapZoom + delta);
+  }
+
+  function handleRouteMapWheel(event) {
+    if (!els.routeMap.querySelector(".route-map-stage") || !event.deltaY) return;
+    event.preventDefault();
+    setRouteZoom(state.mapZoom + (event.deltaY < 0 ? 0.2 : -0.2), event.clientX, event.clientY);
+  }
+
+  function setRouteZoom(value, clientX, clientY) {
+    const stage = els.routeMap.querySelector(".route-map-stage");
+    if (!stage) return;
+    const nextZoom = normalizeMapZoom(value);
+    if (nextZoom === state.mapZoom) return;
+
+    const rect = els.routeMap.getBoundingClientRect();
+    const anchorX = Number.isFinite(clientX)
+      ? Math.max(0, Math.min(els.routeMap.clientWidth, clientX - rect.left))
+      : els.routeMap.clientWidth / 2;
+    const anchorY = Number.isFinite(clientY)
+      ? Math.max(0, Math.min(els.routeMap.clientHeight, clientY - rect.top))
+      : els.routeMap.clientHeight / 2;
+    const ratioX = (els.routeMap.scrollLeft + anchorX) / Math.max(1, els.routeMap.scrollWidth);
+    const ratioY = (els.routeMap.scrollTop + anchorY) / Math.max(1, els.routeMap.scrollHeight);
+
+    state.mapZoom = nextZoom;
     applyRouteZoom();
     window.requestAnimationFrame(() => {
-      els.routeMap.scrollLeft = centerX * els.routeMap.scrollWidth - els.routeMap.clientWidth / 2;
-      els.routeMap.scrollTop = centerY * els.routeMap.scrollHeight - els.routeMap.clientHeight / 2;
+      els.routeMap.scrollLeft = ratioX * els.routeMap.scrollWidth - anchorX;
+      els.routeMap.scrollTop = ratioY * els.routeMap.scrollHeight - anchorY;
+      saveRouteViewport();
     });
   }
 
+  function normalizeMapZoom(value) {
+    const zoom = Number(value);
+    if (!Number.isFinite(zoom)) return MAP_MIN_ZOOM;
+    return Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, Math.round(zoom * 100) / 100));
+  }
+
+  function startRouteMapPan(event) {
+    if (event.button !== 0 || !els.routeMap.querySelector(".route-map-stage")) return;
+    if (event.pointerType === "touch" && state.mapZoom <= MAP_MIN_ZOOM) return;
+    state.mapDrag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: els.routeMap.scrollLeft,
+      scrollTop: els.routeMap.scrollTop
+    };
+    els.routeMap.classList.add("is-panning");
+    els.routeMap.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveRouteMapPan(event) {
+    if (!state.mapDrag || state.mapDrag.pointerId !== event.pointerId) return;
+    els.routeMap.scrollLeft = state.mapDrag.scrollLeft - (event.clientX - state.mapDrag.x);
+    els.routeMap.scrollTop = state.mapDrag.scrollTop - (event.clientY - state.mapDrag.y);
+    event.preventDefault();
+  }
+
+  function stopRouteMapPan(event) {
+    if (!state.mapDrag || state.mapDrag.pointerId !== event.pointerId) return;
+    if (els.routeMap.hasPointerCapture(event.pointerId)) {
+      els.routeMap.releasePointerCapture(event.pointerId);
+    }
+    state.mapDrag = null;
+    els.routeMap.classList.remove("is-panning");
+    saveRouteViewport();
+  }
+
   function resetRouteZoom() {
-    state.mapZoom = 1;
+    state.mapZoom = MAP_MIN_ZOOM;
     applyRouteZoom();
     els.routeMap.scrollTo({ left: 0, top: 0 });
+    saveRouteViewport();
   }
 
   function applyRouteZoom() {
@@ -1751,13 +1900,44 @@
       stage.style.height = `${state.mapZoom * 100}%`;
     }
     els.routeMap.classList.toggle("is-zoomed", state.mapZoom >= 1.5);
-    els.routeZoomOutBtn.disabled = state.mapZoom <= 1;
-    els.routeZoomInBtn.disabled = state.mapZoom >= 3;
+    els.routeMap.classList.toggle("is-context-labeled", state.mapZoom >= 2.25);
+    els.routeZoomOutBtn.disabled = state.mapZoom <= MAP_MIN_ZOOM;
+    els.routeZoomInBtn.disabled = state.mapZoom >= MAP_MAX_ZOOM;
+  }
+
+  function saveRouteViewport() {
+    if (!state.mapSignature || !els.routeMap.querySelector(".route-map-stage")) return;
+    state.mapViewByMode[state.mapMode] = {
+      signature: state.mapSignature,
+      zoom: state.mapZoom,
+      scrollLeft: els.routeMap.scrollLeft,
+      scrollTop: els.routeMap.scrollTop
+    };
+  }
+
+  function restoreRouteViewport(viewport) {
+    const view = viewport || {};
+    state.mapZoom = normalizeMapZoom(view.zoom);
+    state.mapViewByMode[state.mapMode] = {
+      signature: state.mapSignature,
+      zoom: state.mapZoom,
+      scrollLeft: Number(view.scrollLeft) || 0,
+      scrollTop: Number(view.scrollTop) || 0
+    };
+    applyRouteZoom();
+    window.requestAnimationFrame(() => {
+      els.routeMap.scrollLeft = Number(view.scrollLeft) || 0;
+      els.routeMap.scrollTop = Number(view.scrollTop) || 0;
+      saveRouteViewport();
+    });
   }
 
   function clearRouteWorkspace(message, clearText = true) {
     state.lastMapRoutes = null;
-    state.mapZoom = 1;
+    state.mapSignature = "";
+    state.mapZoom = MAP_MIN_ZOOM;
+    state.mapDrag = null;
+    els.routeMap.classList.remove("has-map", "is-panning", "is-zoomed", "is-context-labeled");
     els.routeMap.innerHTML = `<div class="route-map-empty">${escapeHtml(message)}</div>`;
     els.routeLegend.innerHTML = "";
     els.routeList.innerHTML = "";
