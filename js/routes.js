@@ -512,15 +512,17 @@
 
   function showGeneratedKey(key, fleetName) {
     els.generatedFleetKey.hidden = false;
-    els.generatedFleetKeyValue.textContent = `${fleetName}: ${key}`;
+    els.generatedFleetKey.dataset.fleetName = fleetName || "";
+    els.generatedFleetKeyValue.dataset.key = String(key || "").trim();
+    els.generatedFleetKeyValue.textContent = String(key || "").trim();
   }
 
   async function copyGeneratedFleetKey() {
-    const text = els.generatedFleetKeyValue.textContent;
-    if (!text) return;
+    const key = (els.generatedFleetKeyValue.dataset.key || els.generatedFleetKeyValue.textContent || "").trim();
+    if (!key) return;
     try {
-      await navigator.clipboard.writeText(text);
-      setLine(els.fleetAdminStatus, "Ключ скопирован.", false);
+      await navigator.clipboard.writeText(key);
+      setLine(els.fleetAdminStatus, "Ключ флота скопирован без названия.", false);
     } catch (_err) {
       setLine(els.fleetAdminStatus, "Не удалось скопировать автоматически. Выдели ключ вручную.", true);
     }
@@ -765,11 +767,12 @@
 
   async function openSelectedFleetRoute() {
     const fleetId = els.fleetLoginSelect.value;
-    const fleetKey = els.fleetLoginKey.value.trim();
+    const fleetKey = normalizeFleetKeyInput(els.fleetLoginKey.value);
     if (!fleetId || !fleetKey) {
       setLine(els.fleetLoginStatus, "Выбери флот и введи его ключ.", true);
       return;
     }
+    els.fleetLoginKey.value = fleetKey;
 
     els.openFleetRouteBtn.disabled = true;
     try {
@@ -1484,10 +1487,11 @@
     const message = err && (err.message || err.details || err.hint)
       ? `${err.message || ""} ${err.details || ""} ${err.hint || ""}`.trim()
       : String(err || "Неизвестная ошибка");
-    if (/wrong fleet key|28000/i.test(message)) return "Неверный ключ флота.";
+    if (/wrong view key/i.test(message)) return "Неверный ключ просмотра.";
+    if (/wrong fleet key/i.test(message)) return "Неверный ключ флота.";
     if (/fleet not found or inactive/i.test(message)) return "Флот не найден или выключен.";
     if (/wrong admin key/i.test(message)) return "Неверный главный админ-ключ.";
-    if (/wrong view key/i.test(message)) return "Неверный ключ просмотра.";
+    if (/28000/i.test(message)) return "Неверный ключ доступа.";
     if (/duplicate key.*fleet_profiles|fleet_profiles_board_id_name/i.test(message)) return "Флот с таким названием уже существует.";
     if (/function .* does not exist|schema cache|list_fleets|create_fleet/i.test(message)) {
       return "В Supabase нужно выполнить актуальный supabase/schema.sql.";
@@ -1499,6 +1503,12 @@
   function normalizeResult(value) {
     const result = String(value || "").trim();
     return result === "Защищена" || result === "Уничтожена" ? result : "";
+  }
+
+  function normalizeFleetKeyInput(value) {
+    const text = String(value || "").trim();
+    const generatedKey = text.match(/(?:^|:\s*)([0-9a-f]{24})\s*$/i);
+    return generatedKey ? generatedKey[1].toUpperCase() : text;
   }
 
   function resultClass(value) {
