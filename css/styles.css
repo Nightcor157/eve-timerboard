@@ -802,7 +802,7 @@ input.table-input:focus {
 }
 
 .route-controls {
-  grid-template-columns: minmax(16rem, 1fr) minmax(10rem, 14rem) auto;
+  grid-template-columns: minmax(16rem, 1fr) repeat(2, minmax(9rem, 12rem)) auto;
 }
 
 .fleet-login-grid {
@@ -1161,6 +1161,10 @@ input.system-autocomplete.is-invalid {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+}
+
+.route-result-actions {
+  width: 100%;
 }
 
 .route-recommendation {

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EVE Online Timerboard</title>
-  <link rel="stylesheet" href="css/styles.css?v=20261024-5" />
+  <link rel="stylesheet" href="css/styles.css?v=20261024-6" />
 </head>
 <body>
   <header class="topbar">
@@ -244,8 +244,8 @@ Hakatiz - 7-6
       <section id="generalRoutePanel" class="panel">
         <div class="section-title">
           <div>
-            <h2>Маршрут к ближайшему таймеру</h2>
-            <span class="hint">Укажите систему, в которой вы сейчас находитесь. Сайт примет её за старт маршрута и сам выберет подходящий активный таймер.</span>
+            <h2>Общий последовательный маршрут</h2>
+            <span class="hint">Укажи текущую систему и скорость флота. Сайт построит цепочку от этого старта через все активные таймеры.</span>
           </div>
         </div>
         <div class="route-controls">
@@ -257,6 +257,10 @@ Hakatiz - 7-6
           <label>
             Секунд на прыжок
             <input id="generalSecondsPerJump" type="number" min="5" max="3600" value="60" />
+          </label>
+          <label>
+            Минут на цели
+            <input id="generalServiceMinutes" type="number" min="0" max="240" value="10" />
           </label>
           <button id="buildGeneralRouteBtn" class="primary-btn" type="button">Рассчитать</button>
         </div>
@@ -401,7 +405,7 @@ Hakatiz - 7-6
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
-  <script src="js/app.js?v=20261024-5"></script>
-  <script src="js/routes.js?v=20261024-5"></script>
+  <script src="js/app.js?v=20261024-6"></script>
+  <script src="js/routes.js?v=20261024-6"></script>
 </body>
 </html>

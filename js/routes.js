@@ -8,6 +8,7 @@
   const ESI_COMPATIBILITY_DATE = "2025-09-30";
   const FLEET_KEY_PREFIX = `eve_timerboard_fleet_key_${BOARD_ID}_`;
   const GENERAL_ORIGIN_KEY = `eve_timerboard_route_origin_${BOARD_ID}`;
+  const GENERAL_SERVICE_KEY = `eve_timerboard_route_service_${BOARD_ID}`;
   const SYSTEM_CATALOG_URL = "data/solar-systems.json?v=3646012";
   let viewAccessGranted = document.body.classList.contains("has-view-access");
 
@@ -56,6 +57,7 @@
     generalRoutePanel: document.getElementById("generalRoutePanel"),
     generalOriginSystem: document.getElementById("generalOriginSystem"),
     generalSecondsPerJump: document.getElementById("generalSecondsPerJump"),
+    generalServiceMinutes: document.getElementById("generalServiceMinutes"),
     buildGeneralRouteBtn: document.getElementById("buildGeneralRouteBtn"),
     generalRouteStatus: document.getElementById("generalRouteStatus"),
     fleetAccessPanel: document.getElementById("fleetAccessPanel"),
@@ -95,6 +97,7 @@
 
   function init() {
     els.generalOriginSystem.value = localStorage.getItem(GENERAL_ORIGIN_KEY) || "";
+    els.generalServiceMinutes.value = localStorage.getItem(GENERAL_SERVICE_KEY) || "10";
     loadSystemCatalog().catch(() => {});
     bindSystemAutocomplete(els.generalOriginSystem);
     bindSystemAutocomplete(els.newFleetSystem);
@@ -135,6 +138,7 @@
     els.calculateFleetRoutesBtn.addEventListener("click", calculateFleetRoutes);
     els.copyFleetKeyBtn.addEventListener("click", copyGeneratedFleetKey);
     els.fleetProfilesList.addEventListener("click", handleFleetProfileAction);
+    els.routeList.addEventListener("click", handleRouteResultAction);
 
     if (els.adminKey) {
       els.adminKey.addEventListener("change", () => {
@@ -581,14 +585,9 @@
         const targetSystem = resolved.get(normalizeName(timer.system));
         if (!targetSystem) throw new Error(`Система таймера не найдена в ESI: ${timer.system}`);
 
-        const options = await Promise.all(fleetStates.map(async (fleetState) => {
-          const routeIds = await getEsiRoute(fleetState.currentId, targetSystem.id);
-          const jumps = Math.max(0, routeIds.length - 1);
-          const arrivalAt = fleetState.availableAt + jumps * Number(fleetState.fleet.seconds_per_jump) * 1000;
-          const deadline = new Date(timer.end_at).getTime();
-          const lateness = Math.max(0, arrivalAt - deadline);
-          return { fleetState, routeIds, jumps, arrivalAt, lateness };
-        }));
+        const options = await Promise.all(fleetStates.map((fleetState) =>
+          calculateFleetTargetOption(fleetState, targetSystem, timer)
+        ));
 
         options.sort((a, b) => {
           if (Boolean(a.lateness) !== Boolean(b.lateness)) return a.lateness ? 1 : -1;
@@ -608,10 +607,7 @@
           route_ids: best.routeIds
         });
 
-        const deadline = new Date(timer.end_at).getTime();
-        best.fleetState.availableAt = Math.max(best.arrivalAt, deadline) +
-          Number(best.fleetState.fleet.service_minutes) * 60 * 1000;
-        best.fleetState.currentId = targetSystem.id;
+        advanceFleetState(best, targetSystem, timer);
       }
 
       const routeIds = [...new Set(assignments.flatMap((item) => item.route_ids))];
@@ -640,9 +636,31 @@
     }
   }
 
+  async function calculateFleetTargetOption(fleetState, targetSystem, timer) {
+    const routeIds = await getEsiRoute(fleetState.currentId, targetSystem.id);
+    const jumps = Math.max(0, routeIds.length - 1);
+    const arrivalAt = fleetState.availableAt + jumps * Number(fleetState.fleet.seconds_per_jump) * 1000;
+    const deadline = new Date(timer.end_at).getTime();
+    return {
+      fleetState,
+      routeIds,
+      jumps,
+      arrivalAt,
+      lateness: Math.max(0, arrivalAt - deadline)
+    };
+  }
+
+  function advanceFleetState(option, targetSystem, timer) {
+    const deadline = new Date(timer.end_at).getTime();
+    option.fleetState.availableAt = Math.max(option.arrivalAt, deadline) +
+      Number(option.fleetState.fleet.service_minutes) * 60 * 1000;
+    option.fleetState.currentId = targetSystem.id;
+  }
+
   async function buildGeneralRoute() {
     const enteredOrigin = els.generalOriginSystem.value.trim();
     const secondsPerJump = boundedNumber(els.generalSecondsPerJump.value, 5, 3600, 60);
+    const serviceMinutes = boundedNumber(els.generalServiceMinutes.value, 0, 240, 10);
     if (!enteredOrigin) {
       setLine(els.generalRouteStatus, "Укажите стартовую систему, в которой вы сейчас находитесь.", true);
       return;
@@ -666,45 +684,64 @@
       const originSystem = resolved.get(normalizeName(origin));
       if (!originSystem) throw new Error(`Система не найдена в ESI: ${origin}`);
 
-      const candidates = await mapLimit(targets, 4, async (timer) => {
+      const fleetState = {
+        fleet: {
+          seconds_per_jump: secondsPerJump,
+          service_minutes: serviceMinutes
+        },
+        currentId: originSystem.id,
+        availableAt: Date.now(),
+        order: 0
+      };
+      const candidates = [];
+      const sortedTargets = targets.slice().sort((a, b) => new Date(a.end_at) - new Date(b.end_at));
+      for (let index = 0; index < sortedTargets.length; index += 1) {
+        const timer = sortedTargets[index];
+        setLine(
+          els.generalRouteStatus,
+          `Расчёт цели ${index + 1} из ${sortedTargets.length}: ${timer.system}…`,
+          false
+        );
         const targetSystem = resolved.get(normalizeName(timer.system));
-        if (!targetSystem) return null;
-        const routeIds = await getEsiRoute(originSystem.id, targetSystem.id);
-        const jumps = Math.max(0, routeIds.length - 1);
-        const eta = Date.now() + jumps * secondsPerJump * 1000;
-        return {
+        if (!targetSystem) throw new Error(`Система таймера не найдена в ESI: ${timer.system}`);
+        const option = await calculateFleetTargetOption(fleetState, targetSystem, timer);
+        fleetState.order += 1;
+        candidates.push({
           timer,
           targetSystem,
-          routeIds,
-          jumps,
-          eta,
-          marginMs: new Date(timer.end_at).getTime() - eta
-        };
-      });
+          routeIds: option.routeIds,
+          jumps: option.jumps,
+          eta: option.arrivalAt,
+          marginMs: new Date(timer.end_at).getTime() - option.arrivalAt
+        });
+        advanceFleetState(option, targetSystem, timer);
+      }
 
-      const valid = candidates.filter(Boolean).sort((a, b) => {
-        const aLate = a.marginMs < 0;
-        const bLate = b.marginMs < 0;
-        if (aLate !== bLate) return aLate ? 1 : -1;
-        if (aLate && bLate) return b.marginMs - a.marginMs || a.jumps - b.jumps;
-        return a.marginMs - b.marginMs || a.jumps - b.jumps;
-      });
-      if (!valid.length) throw new Error("Не удалось построить путь ни к одной цели.");
-      const recommended = valid[0];
-      const names = await resolveIdsToNames(recommended.routeIds);
-      const nodes = recommended.routeIds.map((id) => ({ id, name: names.get(Number(id)) || String(id) }));
+      if (!candidates.length) throw new Error("Не удалось построить путь ни к одной цели.");
+      const recommended = candidates[0];
+      const allRouteIds = [...new Set(candidates.flatMap((candidate) => candidate.routeIds))];
+      const names = await resolveIdsToNames(allRouteIds);
+      const nodes = [];
+      for (const candidate of candidates) {
+        for (const id of candidate.routeIds) {
+          if (!nodes.length || nodes[nodes.length - 1].id !== Number(id)) {
+            nodes.push({ id: Number(id), name: names.get(Number(id)) || String(id) });
+          }
+        }
+      }
 
       localStorage.setItem(GENERAL_ORIGIN_KEY, origin);
+      localStorage.setItem(GENERAL_SERVICE_KEY, String(serviceMinutes));
       renderRouteMap([{
-        name: `${origin} → ${recommended.timer.system}`,
+        name: `${origin} → ${candidates[candidates.length - 1].timer.system}`,
         color: "#27a7d8",
         nodes,
-        targetIds: new Set([Number(recommended.targetSystem.id)])
+        targetIds: new Set(candidates.map((candidate) => Number(candidate.targetSystem.id)))
       }]);
-      renderGeneralCandidates(valid, recommended, secondsPerJump);
+      renderGeneralCandidates(candidates, recommended, secondsPerJump, serviceMinutes);
       els.routeWorkspaceTitle.textContent = `Следующая цель: ${recommended.timer.system}`;
-      els.routeWorkspaceHint.textContent = `${recommended.jumps} прыжков, ETA ${formatUtc(recommended.eta)}, запас ${formatSignedDuration(recommended.marginMs)}`;
-      setLine(els.generalRouteStatus, `Рекомендуемая следующая цель: ${recommended.timer.system}.`, false);
+      els.routeWorkspaceHint.textContent = `Целей: ${candidates.length}. Первый переход: ${formatJumpCount(recommended.jumps)}, ETA ${formatUtc(recommended.eta)}.`;
+      setLine(els.generalRouteStatus, `Последовательный маршрут построен. Следующая цель: ${recommended.timer.system}.`, false);
     } catch (err) {
       setLine(els.generalRouteStatus, friendlyError(err), true);
     } finally {
@@ -712,7 +749,7 @@
     }
   }
 
-  function renderGeneralCandidates(candidates, recommended, secondsPerJump) {
+  function renderGeneralCandidates(candidates, recommended, secondsPerJump, serviceMinutes) {
     els.routeLegend.innerHTML = `
       <span class="route-legend-item">
         <span class="route-legend-swatch" style="--fleet-color:#27a7d8"></span>
@@ -722,7 +759,7 @@
     els.routeList.innerHTML = `
       <div class="route-recommendation">
         <div><strong>${escapeHtml(recommended.timer.system)}</strong><span>рекомендуемая следующая цель</span></div>
-        <div><strong>${recommended.jumps}</strong><span>прыжков</span></div>
+        <div><strong>${recommended.jumps}</strong><span>${escapeHtml(jumpWord(recommended.jumps))}</span></div>
         <div><strong>${escapeHtml(formatUtc(recommended.eta))}</strong><span>ETA, EVE/UTC</span></div>
         <div><strong class="route-margin ${recommended.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(recommended.marginMs))}</strong><span>запас</span></div>
       </div>
@@ -731,10 +768,10 @@
           <div class="route-list-order">${index + 1}</div>
           <div><div class="route-list-system">${escapeHtml(candidate.timer.system)}</div><div class="route-list-meta">${escapeHtml(candidate.timer.object_name || "объект не указан")}</div></div>
           <div>${escapeHtml(candidate.timer.structure || "—")}</div>
-          <div>${candidate.jumps} прыжков</div>
+          <div>${escapeHtml(formatJumpCount(candidate.jumps))}</div>
           <div>${escapeHtml(formatUtc(candidate.eta))}</div>
           <div class="route-margin ${candidate.marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(candidate.marginMs))}</div>
-          <div class="route-list-meta">${secondsPerJump} сек/прыжок</div>
+          <div class="route-list-meta">${secondsPerJump} сек/прыжок · ${serviceMinutes} мин/цель</div>
         </div>
       `).join("")}`;
   }
@@ -790,7 +827,7 @@
       rememberCurrentFleetKey();
       const fleet = state.fleets.find((item) => item.fleet_id === fleetId);
       renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
-      setLine(els.fleetLoginStatus, "Маршрут открыт. На доске доступны итоги назначенных целей.", false);
+      setLine(els.fleetLoginStatus, "Маршрут открыт. Итог можно поставить прямо в строке цели или на доске.", false);
     } catch (err) {
       state.selectedFleetKey = "";
       publishFleetBoardAccess("", "", []);
@@ -878,16 +915,79 @@
           <div class="route-list-order">${Number(row.route_order)}</div>
           <div><div class="route-list-system">${escapeHtml(row.timer_system)}</div><div class="route-list-meta">${escapeHtml(row.fleet_name)}</div></div>
           <div><div>${escapeHtml(row.object_name || "—")}</div><div class="route-list-meta">${escapeHtml(row.structure || "")}</div></div>
-          <div>${Number(row.jump_count)} прыжков</div>
+          <div>${escapeHtml(formatJumpCount(row.jump_count))}</div>
           <div><div>${escapeHtml(formatUtc(row.eta_at))}</div><div class="route-list-meta">таймер ${escapeHtml(formatUtc(row.end_at))}</div></div>
           <div class="route-margin ${marginMs >= 0 ? "is-positive" : "is-negative"}">${escapeHtml(formatSignedDuration(marginMs))}</div>
           <div class="route-result-summary">
-            ${result
-              ? `<span class="result-badge ${resultClass(result)}">${escapeHtml(result)}</span>`
-              : '<span class="route-list-meta">Итог ставится на доске</span>'}
+            ${renderRouteResultControl(row, result)}
           </div>
         </div>`;
     }).join("");
+  }
+
+  function renderRouteResultControl(row, result) {
+    if (!canEditFleetRouteResult(row)) {
+      return result
+        ? `<span class="result-badge ${resultClass(result)}">${escapeHtml(result)}</span>`
+        : '<span class="route-list-meta">Итог не поставлен</span>';
+    }
+
+    return `
+      <div class="result-actions route-result-actions">
+        <button class="result-action-btn is-defended-result ${result === "Защищена" ? "is-selected-result" : ""}" type="button" data-route-result="Защищена">Защищена</button>
+        <button class="result-action-btn is-destroyed-result ${result === "Уничтожена" ? "is-selected-result" : ""}" type="button" data-route-result="Уничтожена">Уничтожена</button>
+        <button class="result-action-btn result-reset-btn" type="button" data-route-result="" ${result ? "" : "disabled"}>Сброс</button>
+      </div>`;
+  }
+
+  function canEditFleetRouteResult(row) {
+    return !adminViewEnabled &&
+      Boolean(state.selectedFleetKey) &&
+      String(row.fleet_id) === String(state.selectedFleetId);
+  }
+
+  async function handleRouteResultAction(event) {
+    const button = event.target.closest("button[data-route-result]");
+    if (!button) return;
+    const routeRow = button.closest(".route-list-row[data-timer-id]");
+    if (!routeRow) return;
+    const row = state.routeRows.find((item) =>
+      String(item.timer_id) === String(routeRow.dataset.timerId) &&
+      String(item.fleet_id) === String(routeRow.dataset.fleetId)
+    );
+    if (!row || !canEditFleetRouteResult(row)) return;
+
+    const selectedResult = normalizeResult(button.dataset.routeResult);
+    const nextResult = selectedResult && normalizeResult(row.result) === selectedResult ? "" : selectedResult;
+    const group = button.closest(".result-actions");
+    if (group) group.querySelectorAll("button").forEach((item) => { item.disabled = true; });
+
+    try {
+      const { error } = await db.rpc("set_fleet_timer_result", {
+        p_board_id: BOARD_ID,
+        p_view_key: getReadKey(),
+        p_access_key: state.selectedFleetKey,
+        p_fleet_id: state.selectedFleetId,
+        p_timer_id: row.timer_id,
+        p_result: nextResult
+      });
+      if (error) throw error;
+      state.routeRows = state.routeRows.map((item) =>
+        String(item.timer_id) === String(row.timer_id) && String(item.fleet_id) === String(row.fleet_id)
+          ? { ...item, result: nextResult }
+          : item
+      );
+      const fleet = state.fleets.find((item) => String(item.fleet_id) === String(state.selectedFleetId));
+      renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
+      setLine(els.fleetLoginStatus, nextResult ? `Итог «${nextResult}» сохранён.` : "Итог сброшен.", false);
+      window.dispatchEvent(new CustomEvent("eve-timerboard:route-result-updated", {
+        detail: { timerId: String(row.timer_id), result: nextResult }
+      }));
+    } catch (err) {
+      setLine(els.fleetLoginStatus, `Ошибка итога: ${friendlyError(err)}`, true);
+      const fleet = state.fleets.find((item) => String(item.fleet_id) === String(state.selectedFleetId));
+      renderFleetRoutes(state.routeRows, fleet ? fleet.fleet_name : "Флот");
+    }
   }
 
   function publishFleetBoardAccess(fleetId, fleetKey, rows) {
@@ -1528,6 +1628,21 @@
     return Math.min(max, Math.max(min, Math.round(number)));
   }
 
+  function formatJumpCount(value) {
+    const count = Math.max(0, Math.round(Number(value) || 0));
+    return `${count} ${jumpWord(count)}`;
+  }
+
+  function jumpWord(value) {
+    const count = Math.abs(Math.round(Number(value) || 0));
+    const lastTwo = count % 100;
+    const last = count % 10;
+    if (lastTwo >= 11 && lastTwo <= 14) return "прыжков";
+    if (last === 1) return "прыжок";
+    if (last >= 2 && last <= 4) return "прыжка";
+    return "прыжков";
+  }
+
   function formatUtc(value) {
     const date = typeof value === "number" ? new Date(value) : new Date(String(value || ""));
     if (Number.isNaN(date.getTime())) return "—";
@@ -1562,20 +1677,6 @@
     if (security >= 0.5) return "#69aebf";
     if (security > 0) return "#b9a264";
     return "#9b6970";
-  }
-
-  async function mapLimit(items, limit, worker) {
-    const results = new Array(items.length);
-    let nextIndex = 0;
-    async function run() {
-      while (nextIndex < items.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await worker(items[index], index);
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
-    return results;
   }
 
   function escapeHtml(value) {

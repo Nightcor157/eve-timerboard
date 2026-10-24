@@ -180,6 +180,7 @@
       if (event.key === "Enter") unlockView();
     });
     window.addEventListener("eve-timerboard:fleet-board-access", applyFleetBoardAccess);
+    window.addEventListener("eve-timerboard:route-result-updated", applyRouteResultUpdate);
     window.addEventListener("eve-timerboard:request-view-access", () => {
       if (adminViewEnabled) return;
       showViewGate("Введите ключ просмотра, чтобы открыть маршруты.", false);
@@ -859,6 +860,18 @@
           timerIds: new Set((detail.timerIds || []).map(String))
         }
       : null;
+    lastRenderedSignature = "";
+    renderTimers();
+  }
+
+  function applyRouteResultUpdate(event) {
+    const detail = event && event.detail;
+    if (!detail || !detail.timerId) return;
+    timers = timers.map((timer) => String(timer.id) === String(detail.timerId) ? {
+      ...timer,
+      note: normalizeStructureResult(detail.result),
+      updated_at: new Date().toISOString()
+    } : timer);
     lastRenderedSignature = "";
     renderTimers();
   }
