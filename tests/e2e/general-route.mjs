@@ -57,6 +57,31 @@ for (const device of [
     assert.equal(await page.locator(".map-route-node.is-target").count(), 1);
     assert.ok((await page.locator(".map-region-label").allTextContents()).includes("The Forge"));
     assert.deepEqual(await page.locator("#generalRoutePanel [data-filter-summary]").allTextContents(), ["Оборона", "Metenox Moon Drill + Customs Office"]);
+
+    if (device.name === "desktop") {
+      const map = page.locator("#routeMap");
+      const initialHeight = await map.evaluate((element) => element.getBoundingClientRect().height);
+      await page.click("#routeZoomInBtn");
+      const zoom = Number(await page.locator("#routeMap .route-map-stage").getAttribute("data-zoom"));
+      assert.ok(zoom > 1, "zoom button must increase map scale");
+
+      const viewBoxBeforePan = await page.locator("#routeMap svg").getAttribute("viewBox");
+      const box = await map.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2 + 30);
+      await page.mouse.up();
+      assert.notEqual(await page.locator("#routeMap svg").getAttribute("viewBox"), viewBoxBeforePan);
+
+      await page.locator("#routeMapResizeHandle").focus();
+      await page.keyboard.press("ArrowDown");
+      const resizedHeight = await map.evaluate((element) => element.getBoundingClientRect().height);
+      assert.ok(resizedHeight > initialHeight, "keyboard resize must increase map height");
+
+      await page.click("#fleetMapModeBtn");
+      await page.click("#generalMapModeBtn");
+      await page.waitForFunction(() => Number(document.querySelector("#routeMap .route-map-stage")?.dataset.zoom) > 1);
+    }
   }, { viewport: device.viewport });
 }
 

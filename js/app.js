@@ -8,7 +8,6 @@ import { getTimerState, isWithinCompletedWindow } from "./core/timer-rules.js";
 import { getTimerboardApi, hasSupabaseConfig as isSupabaseConfigured } from "./services/supabase-api.js";
 import {
   cleanText,
-  compareText,
   escapeHtml,
   formatUtc,
   normalizeStructureResult,
@@ -16,6 +15,8 @@ import {
   normalizeTimerKind,
   parseUtcInput
 } from "./shared/format.js";
+import { APP_EVENTS, appController } from "./app-controller.js";
+import { sortBoardTimers } from "./ui/board-view.js";
 
 (function () {
   "use strict";
@@ -167,9 +168,9 @@ import {
       if (event.key === "Enter") unlockView();
     });
     els.viewKey.addEventListener("input", invalidateTimerLoads);
-    window.addEventListener("eve-timerboard:fleet-board-access", applyFleetBoardAccess);
-    window.addEventListener("eve-timerboard:route-result-updated", applyRouteResultUpdate);
-    window.addEventListener("eve-timerboard:request-view-access", () => {
+    appController.on(APP_EVENTS.FLEET_BOARD_ACCESS, applyFleetBoardAccess);
+    appController.on(APP_EVENTS.ROUTE_RESULT_UPDATED, applyRouteResultUpdate);
+    appController.on(APP_EVENTS.REQUEST_VIEW_ACCESS, () => {
       if (adminViewEnabled) return;
       showViewGate("Введите ключ просмотра, чтобы открыть маршруты.", false);
       window.setTimeout(() => els.viewKey.focus(), 0);
@@ -285,9 +286,7 @@ import {
       history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     }
 
-    window.dispatchEvent(new CustomEvent("eve-timerboard:admin-view-changed", {
-      detail: { enabled: adminViewEnabled }
-    }));
+    appController.emit(APP_EVENTS.ADMIN_VIEW_CHANGED, { enabled: adminViewEnabled });
   }
 
   function openAdminAccessDialog(message) {
@@ -357,9 +356,7 @@ import {
   function setViewAccessGranted(granted) {
     viewAccessGranted = Boolean(granted);
     document.body.classList.toggle("has-view-access", viewAccessGranted);
-    window.dispatchEvent(new CustomEvent("eve-timerboard:view-access-changed", {
-      detail: { granted: viewAccessGranted }
-    }));
+    appController.emit(APP_EVENTS.VIEW_ACCESS_CHANGED, { granted: viewAccessGranted });
   }
 
   function getReadKey() {
@@ -660,10 +657,9 @@ import {
     els.statSoon.textContent = String(soonCount);
     els.statEnded.textContent = String(endedCount);
 
-    const visible = enriched
+    const visible = sortBoardTimers(enriched
       .filter((timer) => !timer.isCompleted || showEnded && isWithinCompletedWindow(timer.completedAgeMs, endedWindowMs))
-      .filter((timer) => !search || searchableText(timer).includes(search))
-      .sort((a, b) => compareTimers(a, b, boardSort));
+      .filter((timer) => !search || searchableText(timer).includes(search)), boardSort, now);
 
     updateBoardSortHeaders();
 
@@ -812,7 +808,7 @@ import {
       } : item);
       lastRenderedSignature = "";
       renderTimers();
-      window.dispatchEvent(new CustomEvent("eve-timerboard:board-result-updated"));
+      appController.emit(APP_EVENTS.BOARD_RESULT_UPDATED);
     } catch (err) {
       setStatus(`Ошибка результата: ${friendlyDbError(err)}`, true);
       lastRenderedSignature = "";
@@ -1133,30 +1129,6 @@ import {
       const active = header.dataset.sortKey === boardSort.key;
       header.setAttribute("aria-sort", active ? boardSort.direction === "asc" ? "ascending" : "descending" : "none");
     });
-  }
-
-  function compareTimers(a, b, sort) {
-    const direction = sort.direction === "desc" ? -1 : 1;
-    const result = compareBoardSortValue(a, b, sort.key) || compareTime(a, b) || compareText(a.system, b.system);
-    return result * direction;
-  }
-
-  function compareBoardSortValue(a, b, key) {
-    if (key === "end_at") return compareTime(a, b);
-    if (key === "remaining") {
-      const aRemaining = a.isCompleted ? 0 : Math.max(0, new Date(a.end_at).getTime() - Date.now());
-      const bRemaining = b.isCompleted ? 0 : Math.max(0, new Date(b.end_at).getTime() - Date.now());
-      return aRemaining - bRemaining;
-    }
-    if (key === "object_name") return compareText(normalizeStructureType(a.object_name), normalizeStructureType(b.object_name));
-    if (key === "timer_kind") return compareText(normalizeTimerKind(a.distance), normalizeTimerKind(b.distance));
-    if (key === "status") return compareText(a.status.label, b.status.label);
-    if (key === "result") return compareText(normalizeStructureResult(a.note), normalizeStructureResult(b.note));
-    return compareText(a[key], b[key]);
-  }
-
-  function compareTime(a, b) {
-    return new Date(a.end_at).getTime() - new Date(b.end_at).getTime();
   }
 
   function tick() {

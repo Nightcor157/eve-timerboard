@@ -1,0 +1,56 @@
+@media (max-width: 900px) {
+  .topbar, .hero, .section-title, .board-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .stats, .admin-grid {
+    min-width: 0;
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+  .toolbar, .toolbar input[type="search"], .toolbar-select, .toolbar-select select {
+    width: 100%;
+  }
+  .defaults-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .defaults-grid {
+    grid-template-columns: repeat(2, minmax(9rem, 1fr));
+    overflow-x: visible;
+  }
+  .route-controls,
+  .fleet-route-filters,
+  .fleet-login-grid,
+  .fleet-create-grid,
+  .fleet-profile-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .route-result-summary {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .defaults-grid {
+    grid-template-columns: 1fr;
+  }
+  .segmented-control,
+  .route-controls,
+  .fleet-route-filters,
+  .fleet-login-grid,
+  .fleet-create-grid,
+  .fleet-profile-row,
+  .route-recommendation {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+  .generated-key,
+  .fleet-profile-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .route-map {
+    height: 28rem;
+  }
+}
